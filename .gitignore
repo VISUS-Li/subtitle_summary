@@ -38,6 +38,7 @@ eggs/
 .vscode/
 *.swp
 *.swo
+.idea/*
 
 # 操作系统相关
 .DS_Store
