@@ -1,0 +1,44 @@
+# 目录排除
+outputs/
+logs/
+downloads/
+
+# 音频文件
+*.mp3
+*.wav
+*.aac
+*.flac
+*.m4a
+*.ogg
+
+# 视频文件
+*.mp4
+*.avi
+*.mov
+*.wmv
+*.flv
+*.mkv
+*.webm
+
+# Python相关
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+eggs/
+*.egg-info/
+
+# IDE相关
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 操作系统相关
+.DS_Store
+Thumbs.db 
