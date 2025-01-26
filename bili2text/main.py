@@ -3,6 +3,7 @@ from pathlib import Path
 from core.downloader import AudioDownloader
 from core.transcriber import AudioTranscriber
 from config import DEFAULT_WHISPER_MODEL, DEFAULT_PROMPT
+import re
 
 
 class Bili2Text:
@@ -12,14 +13,19 @@ class Bili2Text:
 
     def process_url(self, url: str, prompt: str = DEFAULT_PROMPT) -> str:
         """处理单个B站URL"""
-        # 下载音频
-        audio_path = self.downloader.download_from_url(url)
-        if not audio_path:
-            raise Exception(f"下载失败: {url}")
-
-        # 转录音频
-        output_path = self.transcriber.transcribe_file(audio_path, prompt)
-        return output_path
+        result = self.downloader.download_from_url(url)
+        
+        if result['type'] == 'subtitle':
+            # 直接保存字幕文本
+            bv_match = re.search(r'BV\w+', url)
+            output_path = self.output_dir / f"{bv_match.group()}_subtitle.txt"
+            output_path.write_text(result['subtitle_text'], encoding='utf-8')
+            return str(output_path)
+        elif result['type'] == 'audio':
+            # 使用whisper转录音频
+            return self.transcriber.transcribe_file(result['audio_path'], prompt)
+        else:
+            raise Exception("无法获取视频内容")
 
     def process_keyword(
             self,
@@ -48,6 +54,6 @@ if __name__ == "__main__":
     # print(f"转录完成: {result}")
 
     # 处理关键词搜索
-    keyword = "deepseek"
+    keyword = "AI咨询"
     results = processor.process_keyword(keyword, max_results=3)
     print(f"搜索并转录完成: {results}")

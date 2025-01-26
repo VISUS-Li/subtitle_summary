@@ -11,7 +11,11 @@ logger = setup_logger("downloader")
 
 class AudioDownloader:
     def __init__(self):
-        self.bili_api = BilibiliAPI()
+        self.bili_api = BilibiliAPI(
+            sessdata="cea96c36%2C1753239359%2C8d5a6%2A12CjB9-mu9IHs0EkKwqRj-qvaM3Edsqx8Hib0vi3RcfxDKF8HcxvWYUrrINWCTous3RioSVnMzUTB3QUZiOTB0WHpNMHNsSFJIb0hLRmM1MEVBY2ZuSFFVVkpFeDYyX3lFYjFETUhjTmdjMTZpOVRoNm1maHFuWDh0X29DdWIzU25LQWlsT0hRZnZRIIEC",
+            bili_jct="c4dd6df6d3e0d8fe2fd6554f45801799",
+            buvid3="7D9DFB39-938C-8243-A1A1-A9C4508E6F9724117infoc"
+        )
         self.download_dir = DOWNLOAD_DIR
 
     def _sanitize_filename(self, filename: str) -> str:
@@ -28,7 +32,7 @@ class AudioDownloader:
         return filename.strip('_')
 
     @retry_on_failure(max_retries=MAX_RETRIES, delay=RETRY_DELAY)
-    def download_from_url(self, url: str) -> Optional[str]:
+    def _download_audio(self, url: str) -> Optional[str]:
         """从URL下载音频"""
         logger.info(f"开始下载音频: {url}")
 
@@ -84,3 +88,33 @@ class AudioDownloader:
                 continue
 
         return downloaded_files
+
+    def download_from_url(self, url: str) -> dict:
+        """从URL下载内容，优先获取字幕，无字幕时下载音频"""
+        bv_match = re.search(r'BV\w+', url)
+        if not bv_match:
+            raise ValueError("无效的B站URL")
+            
+        bvid = bv_match.group()
+        result = {
+            'audio_path': None,
+            'subtitle_text': None,
+            'type': None  # 'subtitle' 或 'audio'
+        }
+        
+        # 先尝试获取字幕
+        subtitle_text = self.bili_api.get_subtitle(bvid)
+        if subtitle_text:
+            logger.info(f"成功获取视频字幕: {bvid}")
+            result['subtitle_text'] = subtitle_text
+            result['type'] = 'subtitle'
+            return result  # 如果获取到字幕，直接返回结果
+            
+        # 只有在没有字幕的情况下才下载音频
+        logger.info(f"未找到字幕，尝试下载音频: {bvid}")
+        audio_path = self._download_audio(url)
+        if audio_path:
+            result['audio_path'] = audio_path
+            result['type'] = 'audio'
+            
+        return result
