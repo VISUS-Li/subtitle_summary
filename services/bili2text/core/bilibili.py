@@ -3,8 +3,8 @@ import time
 import hashlib
 from urllib.parse import urlencode
 from typing import List, Dict, Optional
-from ..config import MAX_RETRIES, RETRY_DELAY
-from .utils import setup_logger, retry_on_failure
+from services.bili2text.config import MAX_RETRIES, RETRY_DELAY
+from services.bili2text.core.utils import setup_logger, retry_on_failure
 from langchain_community.document_loaders import BiliBiliLoader
 
 logger = setup_logger("bilibili")
@@ -143,9 +143,15 @@ class BilibiliAPI:
             content = docs[0].page_content
             
             # 提取字幕内容
-            if content and "Transcript:" in content:
-                transcript = content.split("Transcript:")[1].strip()
-                return transcript
+            if content:
+                # 检查是否包含标题和描述
+                if "Video Title:" in content and "Transcript:" in content:
+                    transcript = content.split("Transcript:")[1].strip()
+                    return transcript
+                # 如果内容不为空但格式不对，可能是错误的字幕
+                else:
+                    logger.warning("获取到的内容格式不正确，可能是错误的字幕")
+                    return None
                 
             logger.info("未找到字幕内容")
             return None

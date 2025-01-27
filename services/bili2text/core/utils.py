@@ -5,7 +5,20 @@ from pathlib import Path
 from typing import Callable, Any
 from ..config import LOG_DIR
 
-def setup_logger(name: str) -> logging.Logger:
+class WSLogHandler(logging.Handler):
+    def __init__(self, task_manager, task_id):
+        super().__init__()
+        self.task_manager = task_manager
+        self.task_id = task_id
+
+    def emit(self, record):
+        try:
+            msg = self.format(record)
+            self.task_manager.add_log(self.task_id, record.levelname, msg)
+        except Exception:
+            self.handleError(record)
+
+def setup_logger(name: str, task_manager=None, task_id=None) -> logging.Logger:
     """设置日志记录器"""
     logger = logging.getLogger(name)
     logger.setLevel(logging.INFO)
@@ -18,6 +31,13 @@ def setup_logger(name: str) -> logging.Logger:
     # 控制台处理器
     console_handler = logging.StreamHandler()
     console_handler.setLevel(logging.INFO)
+    
+    # WebSocket处理器（如果提供了task_manager和task_id）
+    if task_manager and task_id:
+        ws_handler = WSLogHandler(task_manager, task_id)
+        ws_handler.setLevel(logging.INFO)
+        ws_handler.setFormatter(logging.Formatter('%(message)s'))
+        logger.addHandler(ws_handler)
     
     # 格式化器
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
