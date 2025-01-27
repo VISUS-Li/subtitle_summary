@@ -1,7 +1,8 @@
 import axios from 'axios'
 import type { CookieForm, VideoResult, SearchResult, BatchResult, Progress } from '@/types/bili'
+import { API_CONFIG } from '@/config/api'
 
-const API_BASE_URL = 'http://localhost:8000/bili'
+const API_BASE_URL = API_CONFIG.BILI
 
 function extractBvid(input: string): string {
   if (input.includes('bilibili.com/video/')) {

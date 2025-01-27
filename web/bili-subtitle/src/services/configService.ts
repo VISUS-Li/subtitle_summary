@@ -1,7 +1,8 @@
 import axios from 'axios'
 import type { WhisperConfig, SystemConfig } from '@/types/config'
+import { API_CONFIG } from '@/config/api'
 
-const API_BASE_URL = 'http://localhost:8000/config'
+const API_BASE_URL = API_CONFIG.CONFIG
 
 export const configService = {
   async getSystemConfig(): Promise<SystemConfig> {
