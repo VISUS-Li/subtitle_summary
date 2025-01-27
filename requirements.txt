@@ -1,0 +1,10 @@
+fastapi==0.115.7
+langchain_community==0.3.15
+openai_whisper==20240930
+pydantic==2.10.6
+Requests==2.32.3
+uvicorn==0.34.0
+yt_dlp==2025.1.26
+
+# 使用dev版本，包含最新的更新，才能获取到正确的字幕，但是windows有包不能使用
+git+https://github.com/Nemo2011/bilibili-api.git@dev
