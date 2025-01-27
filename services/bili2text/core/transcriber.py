@@ -2,11 +2,10 @@ from typing import List, Optional
 import whisper
 from pathlib import Path
 from ..config import OUTPUT_DIR
-from .utils import setup_logger, retry_on_failure
+from .utils import retry_on_failure
 from .task_status import TaskStatus
 from services.bili2text.config import get_config
 
-logger = setup_logger("transcriber")
 
 class AudioTranscriber:
     def __init__(self, task_manager=None, config=None):
@@ -28,31 +27,20 @@ class AudioTranscriber:
         """加载Whisper模型"""
         # 如果模型名称改变，重新加载模型
         if self.model is None or self.current_model_name != model_name:
-            if task_id and self.task_manager:
-                self.task_manager.update_task(
-                    task_id,
-                    status=TaskStatus.PROCESSING.value,
-                    message=f"正在加载Whisper模型: {model_name}..."
-                )
-            
+            print(f"正在加载whisper模型：{model_name}")
             device = "cuda" if whisper.torch.cuda.is_available() else "cpu"
-            logger.info(f"检测到的设备: {device}")
+            print(f"检测到的设备: {device}")
             if device == "cuda":
-                logger.info(f"GPU信息: {whisper.torch.cuda.get_device_name(0)}")
+                print(f"GPU信息: {whisper.torch.cuda.get_device_name(0)}")
             
             self.model = whisper.load_model(
                 model_name,
                 device=device
             )
             self.current_model_name = model_name
+            print("whisper模型加载成功")
             
-            if task_id and self.task_manager:
-                self.task_manager.update_task(
-                    task_id,
-                    message=f"Whisper模型 {model_name} 加载完成"
-                )
-            
-            logger.info(f"模型所在设备: {next(self.model.parameters()).device}")
+            print(f"模型所在设备: {next(self.model.parameters()).device}")
             
     @retry_on_failure(max_retries=3, delay=5)
     def transcribe_file(
@@ -75,18 +63,14 @@ class AudioTranscriber:
         if not audio_path.exists():
             error = FileNotFoundError(f"音频文件不存在: {audio_path}")
             if task_id and self.task_manager:
-                self.task_manager.update_task(task_id, error=error)
+                print(f"Task {task_id}: 音频文件不存在: {audio_path}")
             raise error
             
-        logger.info(f"开始转录音频: {audio_path}")
+        print(f"开始转录音频: {audio_path}")
         
         try:
             if task_id and self.task_manager:
-                self.task_manager.update_task(
-                    task_id,
-                    status=TaskStatus.TRANSCRIBING.value,
-                    message="开始转录音频..."
-                )
+                print(f"Task {task_id}: 开始转录音频...")
             
             # 使用transcribe进行转录
             result = self.model.transcribe(
@@ -107,20 +91,15 @@ class AudioTranscriber:
                 f.write(text)
                 
             if task_id and self.task_manager:
-                self.task_manager.update_task(
-                    task_id,
-                    status=TaskStatus.COMPLETED.value,
-                    message="转录完成",
-                    result={"text": text, "file_path": str(output_path)}
-                )
+                print(f"Task {task_id}: 转录完成")
                 
-            logger.info(f"转录完成: {output_path}")
+            print(f"转录完成: {output_path}")
             return str(output_path)
             
         except Exception as e:
-            logger.error(f"转录失败: {str(e)}")
+            print(f"转录失败: {str(e)}")
             if task_id and self.task_manager:
-                self.task_manager.update_task(task_id, error=e)
+                print(f"Task {task_id}: 转录失败: {str(e)}")
             raise
 
     def transcribe_files(
@@ -144,7 +123,7 @@ class AudioTranscriber:
                 if output_file:
                     output_files.append(output_file)
             except Exception as e:
-                logger.error(f"转录文件失败 {audio_path}: {str(e)}")
+                print(f"转录文件失败 {audio_path}: {str(e)}")
                 continue
                 
         return output_files 

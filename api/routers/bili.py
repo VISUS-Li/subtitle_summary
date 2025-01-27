@@ -1,7 +1,6 @@
 from fastapi import APIRouter, HTTPException, WebSocket, BackgroundTasks
 from typing import List, Optional
 
-from fastapi.logger import logger
 from pydantic import BaseModel
 
 from db.models import BiliConfig
@@ -14,7 +13,9 @@ from services.bili2text.core.task_status import TaskStatus
 import asyncio
 from fastapi import WebSocketDisconnect
 import uuid
-from services.bili2text.core.utils import setup_logger
+from services.bili2text.core.utils import current_task_id
+import contextvars  # 引入contextvars
+from contextvars import copy_context  # 修改这里，使用contextvars.copy_context
 
 router = APIRouter(prefix="/bili", tags=["bilibili"])
 db = Database()
@@ -37,7 +38,7 @@ def init_bili_service(tm: TaskManager, config=None):
             bili2text_instance.downloader.bili_api = bili_api
             return True
         except Exception as e:
-            logger.error(f"初始化B站服务失败: {str(e)}")
+            print(f"初始化B站服务失败: {str(e)}")
             return False
     return False
 
@@ -80,40 +81,37 @@ async def get_cookies() -> Optional[BiliConfig]:
 @router.websocket("/ws/{task_id}")
 async def websocket_endpoint(websocket: WebSocket, task_id: str):
     await websocket.accept()
-    logger.info(f"WebSocket connection established for task: {task_id}")
+    print(f"WebSocket connection established for task: {task_id}")
     
-    last_status = None  # 添加状态跟踪
+    last_status = None  # 用于跟踪上一次的状态
     try:
         while True:
-            # 获取任务状态
             task_status = task_manager.get_task(task_id)
             
             if task_status is None:
-                logger.warning(f"Task {task_id} not found")
+                print(f"Task {task_id} not found")
                 await websocket.close(code=1000)
                 break
             
-            # 只在状态发生变化时发送
-            if task_status != last_status:
+            # 只在状态不同时才发送消息
+            if last_status != task_status:
                 await websocket.send_json(task_status)
-                last_status = task_status.copy()  # 更新上次状态
+                last_status = task_status.copy()  # 深拷贝当前状态用于下次比较
             
-            # 如果任务完成或失败，结束连接
             if task_status["status"] in ["completed", "failed"]:
-                logger.info(f"Task {task_id} finished with status: {task_status['status']}")
+                print(f"Task {task_id} finished with status: {task_status['status']}")
                 await asyncio.sleep(1)
                 await websocket.close(code=1000)
                 break
             
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(0.02)
             
     except WebSocketDisconnect:
-        logger.info(f"WebSocket connection disconnected: {task_id}")
+        print(f"WebSocket connection disconnected: {task_id}")
     except Exception as e:
-        logger.error(f"WebSocket error for task {task_id}: {str(e)}")
+        print(f"WebSocket error for task {task_id}: {str(e)}")
         await websocket.close(code=1000)
     finally:
-        # 清理任务状态
         if task_id in task_manager.tasks:
             task_status = task_manager.get_task(task_id)
             if task_status and task_status["status"] in ["completed", "failed"]:
@@ -149,18 +147,20 @@ async def get_video_text(bvid: str, background_tasks: BackgroundTasks):
         return {"task_id": task_id}
         
     except Exception as e:
-        logger.error(f"创建任务失败: {str(e)}")
+        print(f"创建任务失败: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 async def process_video_task(bvid: str, task_id: str, bili2text: Bili2Text, task_manager: TaskManager):
     """后台处理视频任务"""
+    # 保存当前的token，以便在finally中恢复
+    token = None
     try:
         url = f"https://www.bilibili.com/video/{bvid}"
         
-        # 设置带有task_id的logger
-        logger = setup_logger("video_processor", task_manager, task_id)
+        # 设置当前task_id到ContextVar
+        token = current_task_id.set(task_id)
         
-        # 更新任务状态为开始下载
+        # 更新任务状态为开始处理
         task_manager.update_task(
             task_id,
             status=TaskStatus.PROCESSING.value,
@@ -168,12 +168,14 @@ async def process_video_task(bvid: str, task_id: str, bili2text: Bili2Text, task
             message="开始处理视频..."
         )
         
-        # 下载和处理视频
-        result = await asyncio.to_thread(
-            bili2text.downloader.download_from_url,
-            url,
-            task_id
-        )
+        # 定义在后台线程中运行的函数
+        def download_and_process():
+            # 设置当前task_id
+            current_task_id.set(task_id)
+            return bili2text.downloader.download_from_url(url, task_id)
+        
+        # 使用contextvars.copy_context确保ContextVar被复制到新的线程
+        result = await asyncio.to_thread(copy_context().run, download_and_process)
         
         if result['type'] == 'subtitle':
             # 如果是字幕，直接返回结果
@@ -197,11 +199,16 @@ async def process_video_task(bvid: str, task_id: str, bili2text: Bili2Text, task
                 message="正在转录音频..."
             )
             
-            text_path = await asyncio.to_thread(
-                bili2text.transcriber.transcribe_file,
-                result['audio_path'],
-                task_id
-            )
+            # 定义在后台线程中运行的转录函数
+            def transcribe_audio():
+                current_task_id.set(task_id)
+                return bili2text.transcriber.transcribe_file(
+                    result['audio_path'],
+                    task_id
+                )
+            
+            # 使用contextvars.copy_context确保ContextVar被复制到新的线程
+            text_path = await asyncio.to_thread(copy_context().run, transcribe_audio)
             
             with open(text_path, 'r', encoding='utf-8') as f:
                 text = f.read()
@@ -219,14 +226,18 @@ async def process_video_task(bvid: str, task_id: str, bili2text: Bili2Text, task
             )
         else:
             raise Exception("无法获取视频内容")
-            
+        
     except Exception as e:
-        logger.error(f"处理视频失败: {str(e)}")
+        print(f"处理视频失败: {str(e)}")
         task_manager.update_task(
             task_id,
             status=TaskStatus.FAILED.value,
             message=str(e)
         )
+    finally:
+        # 只有在设置了token的情况下才重置
+        if token is not None:
+            current_task_id.reset(token)
 
 @router.get("/search")
 async def search_videos(keyword: str, page: int = 1, page_size: int = 20):

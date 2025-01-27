@@ -43,6 +43,7 @@ class TaskManager:
             create_time=current_time,
             update_time=current_time
         )
+        print(f"创建新任务: {task_id}")
 
     def update_task(
         self,
@@ -55,6 +56,7 @@ class TaskManager:
     ) -> None:
         """更新任务状态"""
         if task_id not in self.tasks:
+            print(f"任务 {task_id} 未找到")
             raise KeyError(f"Task {task_id} not found")
 
         task = self.tasks[task_id]
@@ -66,6 +68,7 @@ class TaskManager:
                 if status.lower() in ['completed', 'failed']:
                     task.end_time = time.time()
             except ValueError as e:
+                print(f"无效的状态值: {status}")
                 raise ValueError(f"Invalid status value: {status}")
                 
         if progress is not None:
@@ -78,16 +81,19 @@ class TaskManager:
             task.error = error
             task.status = TaskStatus.FAILED.value
             task.end_time = time.time()
+            print(f"任务 {task_id} 失败: {error}")
 
     def get_task(self, task_id: str) -> Optional[Dict[str, Any]]:
         """获取任务状态"""
         if task_id not in self.tasks:
+            print(f"任务 {task_id} 未找到")
             return None
         return self.tasks[task_id].to_dict()
 
     def remove_task(self, task_id: str) -> None:
         """删除任务"""
         if task_id in self.tasks:
+            print(f"删除任务: {task_id}")
             del self.tasks[task_id]
 
     def clean_old_tasks(self, max_age: int = 3600):
@@ -96,11 +102,13 @@ class TaskManager:
         for task_id in list(self.tasks.keys()):
             task = self.tasks[task_id]
             if task.end_time and (current_time - task.end_time) > max_age:
+                print(f"清理过期任务: {task_id}")
                 del self.tasks[task_id]
 
     def add_log(self, task_id: str, level: str, message: str) -> None:
         """添加日志记录"""
         if task_id not in self.tasks:
+            print(f"任务 {task_id} 未找到,无法添加日志")
             return
             
         log_entry = {

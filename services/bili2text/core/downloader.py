@@ -6,11 +6,9 @@ from pathlib import Path
 from yt_dlp.utils import format_bytes, formatSeconds
 
 from ..config import DOWNLOAD_DIR, MAX_RETRIES, RETRY_DELAY
-from .utils import setup_logger, retry_on_failure
+from .utils import retry_on_failure
 from .task_status import TaskStatus
 from services.bili2text.core.bilibili import BilibiliAPI
-
-logger = setup_logger("downloader")
 
 
 class AudioDownloader:
@@ -69,26 +67,13 @@ class AudioDownloader:
                 f"剩余时间: {eta_str}"
             )
                 
-            self.task_manager.update_task(
-                task_id,
-                status=TaskStatus.DOWNLOADING.value,
-                progress=progress,
-                message=message
-            )
+            print(f"[Task {task_id}] Status: {TaskStatus.DOWNLOADING.value}, Progress: {progress}%, Message: {message}")
                 
         elif d['status'] == 'finished':
-            self.task_manager.update_task(
-                task_id,
-                status=TaskStatus.DOWNLOADING.value,
-                progress=100,
-                message="下载完成，准备转换格式"
-            )
+            print(f"[Task {task_id}] Status: {TaskStatus.DOWNLOADING.value}, Progress: 100%, Message: 下载完成，准备转换格式")
+            
         elif d['status'] == 'error':
-            self.task_manager.update_task(
-                task_id,
-                status=TaskStatus.FAILED.value,
-                message=f"下载失败: {d.get('error', '未知错误')}"
-            )
+            print(f"[Task {task_id}] Status: {TaskStatus.FAILED.value}, Message: 下载失败: {d.get('error', '未知错误')}")
 
     def _get_existing_file(self, video_id: str) -> Optional[Path]:
         """检查是否存在已下载的文件"""
@@ -101,7 +86,7 @@ class AudioDownloader:
     @retry_on_failure(max_retries=MAX_RETRIES, delay=RETRY_DELAY)
     def _download_audio(self, url: str, task_id: str = None) -> Optional[str]:
         """从URL下载音频"""
-        logger.info(f"开始处理音频: {url}")
+        print(f"开始处理音频: {url}")
         
         # 从URL中提取视频ID
         bv_match = re.search(r'BV\w+', url)
@@ -112,14 +97,7 @@ class AudioDownloader:
         # 检查是否存在已下载的文件
         existing_file = self._get_existing_file(video_id)
         if existing_file:
-            logger.info(f"找到已下载的文件: {existing_file}")
-            if task_id and self.task_manager:
-                self.task_manager.update_task(
-                    task_id,
-                    status=TaskStatus.DOWNLOADING.value,
-                    progress=100,
-                    message="使用已存在的音频文件"
-                )
+            print(f"找到已下载的文件: {existing_file}")
             return str(existing_file)
 
         ydl_opts = {
@@ -139,11 +117,7 @@ class AudioDownloader:
 
         try:
             if task_id and self.task_manager:
-                self.task_manager.update_task(
-                    task_id,
-                    status=TaskStatus.DOWNLOADING.value,
-                    message="开始下载音频..."
-                )
+                print(f"[Task {task_id}] Status: {TaskStatus.DOWNLOADING.value}, Message: 开始下载音频...")
                 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=True)
@@ -155,25 +129,17 @@ class AudioDownloader:
                         file_path = f
                         break
                 
-                logger.info(f"音频下载成功: {file_path}")
+                print(f"音频下载成功: {file_path}")
                 
                 if task_id and self.task_manager:
-                    self.task_manager.update_task(
-                        task_id,
-                        status=TaskStatus.DOWNLOADING.value,
-                        message="音频下载完成"
-                    )
+                    print(f"[Task {task_id}] Status: {TaskStatus.DOWNLOADING.value}, Message: 音频下载完成")
                     
                 return str(file_path)
                 
         except Exception as e:
-            logger.error(f"下载失败: {str(e)}")
+            print(f"下载失败: {str(e)}")
             if task_id and self.task_manager:
-                self.task_manager.update_task(
-                    task_id,
-                    status=TaskStatus.FAILED.value,
-                    message=f"下载失败: {str(e)}"
-                )
+                print(f"[Task {task_id}] Status: {TaskStatus.FAILED.value}, Message: 下载失败: {str(e)}")
             raise
 
     def _postprocessor_hook(self, task_id: str, d: Dict):
@@ -182,21 +148,14 @@ class AudioDownloader:
             return
             
         if d['status'] == 'started':
-            self.task_manager.update_task(
-                task_id,
-                status=TaskStatus.DOWNLOADING.value,
-                message=f"开始处理: {d.get('postprocessor', '未知处理器')}"
-            )
+            print(f"[Task {task_id}] Status: {TaskStatus.DOWNLOADING.value}, Message: 开始处理: {d.get('postprocessor', '未知处理器')}")
+            
         elif d['status'] == 'finished':
-            self.task_manager.update_task(
-                task_id,
-                status=TaskStatus.DOWNLOADING.value,
-                message=f"处理完成: {d.get('postprocessor', '未知处理器')}"
-            )
+            print(f"[Task {task_id}] Status: {TaskStatus.DOWNLOADING.value}, Message: 处理完成: {d.get('postprocessor', '未知处理器')}")
 
     def download_from_keyword(self, keyword: str, max_results: int = 5) -> List[str]:
         """通过关键词搜索并下载音频"""
-        logger.info(f"开始搜索关键词: {keyword}, 最大结果数: {max_results}")
+        print(f"开始搜索关键词: {keyword}, 最大结果数: {max_results}")
 
         downloaded_files = []
         videos = self.bili_api.search_videos(keyword, max_results)
@@ -208,16 +167,13 @@ class AudioDownloader:
                 if file_path:
                     downloaded_files.append(file_path)
             except Exception as e:
-                logger.error(f"下载视频失败 {video['bvid']}: {str(e)}")
+                print(f"下载视频失败 {video['bvid']}: {str(e)}")
                 continue
 
         return downloaded_files
 
     def download_from_url(self, url: str, task_id: str = None) -> dict:
         """从URL下载内容，优先获取字幕，无字幕时下载音频"""
-        # 设置带有task_id的logger
-        logger = setup_logger("downloader", self.task_manager, task_id)
-        
         bv_match = re.search(r'BV\w+', url)
         if not bv_match:
             raise ValueError("无效的B站URL")
@@ -232,13 +188,13 @@ class AudioDownloader:
         # 先尝试获取字幕
         subtitle_text = self.bili_api.get_subtitle(bvid)
         if subtitle_text:
-            logger.info(f"成功获取视频字幕: {bvid}")
+            print(f"成功获取视频字幕: {bvid}")
             result['subtitle_text'] = subtitle_text
             result['type'] = 'subtitle'
             return result  # 如果获取到字幕，直接返回结果
             
         # 只有在没有字幕的情况下才下载音频
-        logger.info(f"未找到字幕，尝试下载音频: {bvid}")
+        print(f"未找到字幕，尝试下载音频: {bvid}")
         audio_path = self._download_audio(url, task_id)
         if audio_path:
             result['audio_path'] = audio_path

@@ -4,10 +4,8 @@ import hashlib
 from urllib.parse import urlencode
 from typing import List, Dict, Optional
 from services.bili2text.config import MAX_RETRIES, RETRY_DELAY
-from services.bili2text.core.utils import setup_logger, retry_on_failure
+from services.bili2text.core.utils import retry_on_failure
 from langchain_community.document_loaders import BiliBiliLoader
-
-logger = setup_logger("bilibili")
 
 class BilibiliAPI:
     def __init__(self, sessdata=None, bili_jct=None, buvid3=None):
@@ -42,7 +40,7 @@ class BilibiliAPI:
             sub_key = sub_url.split('/')[-1].split('.')[0]
             return img_key, sub_key
         except Exception as e:
-            logger.error(f"获取WBI keys失败: {str(e)}")
+            print(f"获取WBI keys失败: {str(e)}")
             raise
 
     def _get_mixin_key(self, orig_key: str) -> str:
@@ -79,7 +77,7 @@ class BilibiliAPI:
         Returns:
             list: 包含视频信息的字典列表
         """
-        logger.info(f"搜索关键词: {keyword}, 最大结果数: {max_results}")
+        print(f"搜索关键词: {keyword}, 最大结果数: {max_results}")
         
         params = {
             'keyword': keyword,
@@ -111,17 +109,17 @@ class BilibiliAPI:
                             if len(videos) >= max_results:
                                 return videos
             
-            logger.info(f"搜索完成，找到 {len(videos)} 个视频")
+            print(f"搜索完成，找到 {len(videos)} 个视频")
             return videos
             
         except Exception as e:
-            logger.error(f"搜索视频失败: {str(e)}")
+            print(f"搜索视频失败: {str(e)}")
             raise
 
     @retry_on_failure(max_retries=MAX_RETRIES, delay=RETRY_DELAY)
     def get_subtitle(self, bvid: str) -> Optional[str]:
         """获取视频字幕"""
-        logger.info(f"尝试获取视频字幕: {bvid}")
+        print(f"尝试获取视频字幕: {bvid}")
         
         try:
             # 创建BiliBiliLoader实例
@@ -136,7 +134,7 @@ class BilibiliAPI:
             docs = loader.load()
             
             if not docs:
-                logger.info("未找到字幕内容")
+                print("未找到字幕内容")
                 return None
                 
             # 获取第一个文档的内容
@@ -150,13 +148,12 @@ class BilibiliAPI:
                     return transcript
                 # 如果内容不为空但格式不对，可能是错误的字幕
                 else:
-                    logger.warning("获取到的内容格式不正确，可能是错误的字幕")
+                    print("获取到的内容格式不正确，可能是错误的字幕")
                     return None
                 
-            logger.info("未找到字幕内容")
+            print("未找到字幕内容")
             return None
             
         except Exception as e:
-            logger.error(f"获取字幕失败: {str(e)}")
+            print(f"获取字幕失败: {str(e)}")
             return None
-        
