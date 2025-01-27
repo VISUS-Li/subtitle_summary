@@ -41,8 +41,7 @@ export const biliService = {
       console.log('Got task ID:', taskId)
       
       // 创建WebSocket连接
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-      const wsUrl = `${protocol}//${window.location.hostname}:8000/bili/ws/${taskId}`
+      const wsUrl = `${API_CONFIG.WS_BILI}/${taskId}`
       
       return new Promise((resolve, reject) => {
         let reconnectAttempts = 0

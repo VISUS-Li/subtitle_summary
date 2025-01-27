@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
-from routers import bili, config
+from api.routers import bili, config
 from services.bili2text.core.task_manager import TaskManager
 from services.bili2text.core.utils import redirect_stdout_stderr
 
