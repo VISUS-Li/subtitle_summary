@@ -1,0 +1,147 @@
+---
+description: 帮我处理字幕转换相关的逻辑
+globs: 
+---
+
+# 项目结构project_root/
+project_root/
+├── api/
+│   ├── models.py           # API数据模型定义
+│   └── routers/
+│       ├── bili.py         # B站相关API路由
+│       └── config.py       # 配置相关API路由
+│
+├── db/
+│   ├── migrations/         # 数据库迁移文件
+│   │   ├── env.py
+│   │   └── versions/      
+│   ├── init/
+│   │   ├── base.py        # SQLAlchemy基础配置
+│   │   ├── config.py      # 数据库配置
+│   │   └── manager.py     # 数据库管理器
+│   └── models/
+│       ├── service_config.py
+│       └── tables.py
+│
+├── services/
+│   └── bili2text/
+│       ├── core/
+│       │   ├── bilibili.py     # B站API封装
+│       │   ├── downloader.py   # 音视频下载器
+│       │   ├── task_manager.py # 任务管理器
+│       │   ├── task_status.py  # 任务状态定义
+│       │   ├── transcriber.py  # 音频转写器
+│       │   └── utils.py        # 工具函数
+│       ├── config.py           # 服务配置
+│       └── main.py            # 主要业务逻辑
+│
+├── web/
+│   └── bili-subtitle/         # 前端Vue项目
+│       ├── src/
+│       │   ├── assets/
+│       │   │   ├── base.css
+│       │   │   └── main.css
+│       │   ├── components/
+│       │   │   ├── ConfigPanel.vue
+│       │   │   └── ProcessLog.vue
+│       │   ├── config/
+│       │   │   └── api.ts
+│       │   ├── router/
+│       │   │   └── index.ts
+│       │   ├── services/
+│       │   │   └── biliService.ts
+│       │   ├── types/
+│       │   │   └── bili.ts
+│       │   ├── views/
+│       │   │   └── HomeView.vue
+│       │   ├── App.vue
+│       │   └── main.ts
+│       ├── public/
+│       ├── index.html
+│       └── package.json
+│
+├── alembic.ini              # Alembic配置文件
+├── requirements.txt         # Python依赖
+└── server.py               # FastAPI服务器入口
+
+# 系统架构设计
+
+## 后端架构
+
+- **Web框架**: FastAPI
+  - RESTful API设计
+  - 支持异步处理
+  - OpenAPI文档自动生成
+
+- **数据库操作**: SQLAlchemy ORM
+  - 支持数据模型映射
+  - 事务管理
+  - 连接池优化
+
+- **任务管理系统**
+  - 异步任务处理
+  - 任务队列管理
+  - WebSocket实时进度通知
+
+## 前端架构
+
+- **核心技术栈**
+  - Vue 3 
+  - TypeScript
+  - Element Plus UI组件库
+
+- **功能特性**
+  - 实时进度显示
+  - 配置管理界面
+  - 系统状态监控
+  - 响应式设计
+
+## 核心功能模块
+
+- **视频处理**
+  - 基于yt-dlp的视频下载
+  - 视频信息解析
+  - 格式转换
+
+- **音频处理**
+  - Whisper模型集成
+  - 音频转写优化
+  - 多语言支持
+
+- **字幕系统**
+  - 字幕提取
+  - 格式转换
+  - 文本处理
+
+- **系统管理**
+  - 实时任务状态追踪
+  - 配置管理
+  - 系统监控
+
+## 数据库设计
+
+- **数据库选型**: MySQL
+  - 高可靠性
+  - 事务支持
+  - 性能优化
+
+- **特性支持**
+  - 完整的数据库迁移系统
+  - 配置信息持久化
+  - 数据备份恢复
+
+# 项目目的
+- 首要目的：
+    - 该项目是通过两种方式获取bilibili和youtube中的视频的字幕文本。
+    - 第一种方式是直接调用bilibili和youtube的API直接获取外挂字幕数据。
+    - 如果接口调用失败，即未从服务器获取到对应的外挂字幕，则采用第二种方式。
+    - 第二种方式是通过yt-dlp下载bilibili和youtube的对应视频的音频文件，然后使用whisper对音频文件进行音频识别得到字幕文本数据。
+- 第二个目的：
+    - 可以通过关键词搜索，得到bilibili和youtube中有关视频的列表（可以进行分页），然后将所有的视频都通过首要目的中的方式获取到对应的字幕数据。
+    - 得到的字幕数据需要存储到数据库中，以便重复使用。
+    - 在通过首要目的获取字幕之前，需要先在数据库中查询是否有对应的视频的字幕数据，如果有，则重复使用。
+    - 除了可以支持关键词搜索外，还可以支持当前热点视频列表的搜索和字幕文件获取。
+- 第三个目的：
+    - 得到的字幕数据，我将把其作为知识库数据，调用coze平台的API，用以使用大模型对这些字幕进行综合整理，最终得到一篇相关主题的高质量视频脚本大纲。
+    - 在得到的视频大纲中，对于每一个关键点，都应该标注出处视频等，所以应该要尽可能的多存储对应的数据。
+

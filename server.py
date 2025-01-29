@@ -2,19 +2,21 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
-from api.routers import bili, config
+from api.routers import bili, config, youtube
 from services.bili2text.core.task_manager import TaskManager
 from services.bili2text.core.utils import redirect_stdout_stderr
 
 # 创建全局task_manager实例
 task_manager = TaskManager()
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 启动时执行
-    print("正在初始化B站服务...")
-    bili.init_bili_service(task_manager)
-    print("B站服务初始化完成")
+    print("正在初始化服务...")
+    bili.init_bili_processor(task_manager)
+    youtube.init_youtube_processor(task_manager)
+    print("服务初始化完成")
     
     # 重定向标准输出和错误输出
     redirect_stdout_stderr(task_manager)
@@ -45,6 +47,7 @@ app.add_middleware(
 # 注册路由
 app.include_router(bili.router)
 app.include_router(config.router)
+app.include_router(youtube.router)
 
 # app.include_router(youtube.router)
 

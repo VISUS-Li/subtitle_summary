@@ -5,13 +5,15 @@ from pathlib import Path
 
 from yt_dlp.utils import format_bytes, formatSeconds
 
+from db.service_config import ServiceConfig
 from ..config import DOWNLOAD_DIR, MAX_RETRIES, RETRY_DELAY
 from .utils import retry_on_failure
 from .task_status import TaskStatus
 from services.bili2text.core.bilibili import BilibiliAPI
+from services.bili2text.core.youtube import YoutubeAPI
+from .base import BaseDownloader
 
-
-class AudioDownloader:
+class AudioDownloader(BaseDownloader):
     def __init__(self, task_manager=None):
         self.bili_api = BilibiliAPI(
             sessdata="cea96c36%2C1753239359%2C8d5a6%2A12CjB9-mu9IHs0EkKwqRj-qvaM3Edsqx8Hib0vi3RcfxDKF8HcxvWYUrrINWCTous3RioSVnMzUTB3QUZiOTB0WHpNMHNsSFJIb0hLRmM1MEVBY2ZuSFFVVkpFeDYyX3lFYjFETUhjTmdjMTZpOVRoNm1maHFuWDh0X29DdWIzU25LQWlsT0hRZnZRIIEC",
@@ -20,6 +22,27 @@ class AudioDownloader:
         )
         self.download_dir = DOWNLOAD_DIR
         self.task_manager = task_manager
+        self.init_bili_api()  # 初始化时立即获取配置
+        self.youtube_api = YoutubeAPI()
+
+    def init_bili_api(self):
+        """从数据库获取最新配置初始化B站API"""
+        try:
+            db = ServiceConfig()
+            cookies = {
+                'sessdata': db.get_service_config("bilibili", "sessdata"),
+                'bili_jct': db.get_service_config("bilibili", "bili_jct"),
+                'buvid3': db.get_service_config("bilibili", "buvid3")
+            }
+            
+            if not all(cookies.values()):
+                raise ValueError("B站配置不完整")
+            
+            self.bili_api = BilibiliAPI(**cookies)
+        except Exception as e:
+            print(f"初始化B站API失败: {str(e)}")
+            self.bili_api = None
+            raise
 
     def _sanitize_filename(self, filename: str) -> str:
         """清理文件名，移除不合法字符"""
@@ -88,11 +111,15 @@ class AudioDownloader:
         """从URL下载音频"""
         print(f"开始处理音频: {url}")
         
-        # 从URL中提取视频ID
-        bv_match = re.search(r'BV\w+', url)
-        if not bv_match:
-            raise ValueError("无效的B站URL")
-        video_id = bv_match.group()
+        # 判断是否为YouTube URL
+        if 'youtube.com' in url or 'youtu.be' in url:
+            video_id = self._extract_youtube_id(url)
+        else:
+            # 现有的B站逻辑
+            bv_match = re.search(r'BV\w+', url)
+            if not bv_match:
+                raise ValueError("无效的视频URL")
+            video_id = bv_match.group()
         
         # 检查是否存在已下载的文件
         existing_file = self._get_existing_file(video_id)
@@ -172,8 +199,50 @@ class AudioDownloader:
 
         return downloaded_files
 
-    def download_from_url(self, url: str, task_id: str = None) -> dict:
-        """从URL下载内容，优先获取字幕，无字幕时下载音频"""
+    def _extract_youtube_id(self, url: str) -> str:
+        """从YouTube URL中提取视频ID"""
+        if 'youtu.be' in url:
+            return url.split('/')[-1]
+        elif 'youtube.com' in url:
+            from urllib.parse import parse_qs, urlparse
+            parsed = urlparse(url)
+            return parse_qs(parsed.query)['v'][0]
+        raise ValueError("无效的YouTube URL")
+
+    def download_media(self, url: str, task_id: str = None) -> Dict:
+        """统一媒体下载接口"""
+        if 'youtube.com' in url or 'youtu.be' in url:
+            return self._download_youtube_media(url, task_id)
+        else:
+            return self._download_bilibili_media(url, task_id)
+
+    def _download_youtube_media(self, url: str, task_id: str) -> Dict:
+        """处理YouTube下载"""
+        result = {'type': None, 'content': None}
+        
+        # 先尝试获取字幕
+        video_id = self._extract_youtube_id(url)
+        subtitle = self.youtube_api.get_subtitle(video_id)
+        
+        if subtitle:
+            result.update({
+                'type': 'subtitle',
+                'content': subtitle
+            })
+        else:
+            # 下载音频逻辑
+            audio_path = self._download_audio(url, task_id)
+            result.update({
+                'type': 'audio',
+                'content': audio_path
+            })
+            
+        return result
+
+    def _download_bilibili_media(self, url: str, task_id: str = None) -> Dict:
+        """处理B站下载"""
+        self.init_bili_api()
+        
         bv_match = re.search(r'BV\w+', url)
         if not bv_match:
             raise ValueError("无效的B站URL")
@@ -201,3 +270,29 @@ class AudioDownloader:
             result['type'] = 'audio'
             
         return result
+
+    def batch_download(self, keyword: str, max_results: int = 5) -> List[Dict]:
+        """实现批量下载抽象方法"""
+        results = []
+        try:
+            # 根据平台选择搜索API
+            if 'youtube' in keyword.lower():
+                videos = self.youtube_api.search_videos(keyword, max_results)
+                base_url = 'https://youtu.be/'
+            else:
+                videos = self.bili_api.search_videos(keyword, max_results)
+                base_url = 'https://www.bilibili.com/video/'
+
+            for video in videos:
+                video_id = video.get('id') or video.get('bvid')
+                url = f"{base_url}{video_id}"
+                result = self.download_media(url)
+                results.append({
+                    'video_id': video_id,
+                    'title': video.get('title'),
+                    'result': result
+                })
+        except Exception as e:
+            if self.task_manager:
+                self.task_manager.add_log(None, "ERROR", f"批量下载失败: {str(e)}")
+        return results

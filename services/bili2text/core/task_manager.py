@@ -119,3 +119,20 @@ class TaskManager:
         self.tasks[task_id].logs.append(log_entry)
         # 同时更新任务消息
         self.update_task(task_id, message=message)
+
+    def create_batch_task(self, task_type: str) -> str:
+        """创建批量任务"""
+        task_id = f"batch-{str(uuid.uuid4())}"
+        self.tasks[task_id] = Task(
+            status=TaskStatus.PENDING,
+            message=f"批量任务初始化: {task_type}",
+            progress=0
+        )
+        return task_id
+
+    def update_batch_progress(self, task_id: str, current: int, total: int):
+        """更新批量任务进度"""
+        if task_id in self.tasks:
+            progress = (current / total) * 100
+            self.tasks[task_id].progress = progress
+            self.tasks[task_id].message = f"处理中 ({current}/{total})"

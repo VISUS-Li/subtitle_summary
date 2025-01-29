@@ -7,8 +7,9 @@ import type { CookieForm, VideoResult, SearchResult, BatchResult } from '@/types
 import ProcessLog from '@/components/ProcessLog.vue'
 import type { Progress } from '@/types/bili'
 import ConfigPanel from '@/components/ConfigPanel.vue'
+import { youtubeService } from '@/services/youtubeService'
 
-const activeTab = ref('single')
+const activeTab = ref('bilibili')
 const isCookieSet = ref(false)
 const loading = ref(false)
 
@@ -27,6 +28,12 @@ const batchResults = ref<BatchResult[]>([])
 
 // 添加进度日志状态
 const processLogs = ref<Progress[]>([])
+const biliLogs = ref<Progress[]>([])
+const youtubeLogs = ref<Progress[]>([])
+const biliResult = ref<VideoResult | null>(null)
+const youtubeResult = ref<VideoResult | null>(null)
+
+const youtubeId = ref('')
 
 const loadServiceConfig = async () => {
   try {
@@ -59,30 +66,44 @@ const resetCookies = () => {
   cookieForm.buvid3 = ''
 }
 
-const getVideoText = async () => {
+const getVideoText = async (platform: 'bilibili' | 'youtube') => {
   try {
-    if (!bvid.value) {
-      ElMessage.warning('请输入有效的BV号或视频链接')
+    const videoId = platform === 'bilibili' ? bvid.value : youtubeId.value
+    if (!videoId) {
+      ElMessage.warning(`请输入有效的${platform === 'bilibili' ? 'BV号' : 'YouTube视频ID'}或视频链接`)
       return
     }
 
     loading.value = true
-    processLogs.value = [] // 清空之前的日志
-    singleResult.value = null // 清空之前的结果
+    // 清空对应平台的日志和结果
+    if (platform === 'bilibili') {
+      biliLogs.value = []
+      biliResult.value = null
+    } else {
+      youtubeLogs.value = []
+      youtubeResult.value = null
+    }
     
-    const result = await biliService.getVideoTextWithProgress(
-      bvid.value,
+    // 根据平台选择服务
+    const service = platform === 'bilibili' ? biliService : youtubeService
+    const result = await service.getVideoTextWithProgress(
+      videoId,
       (progress) => {
-        // 每收到一条消息就立即更新日志
-        processLogs.value.push({
+        // 更新对应平台的日志
+        const logs = platform === 'bilibili' ? biliLogs : youtubeLogs
+        logs.value.push({
           status: progress.status,
           message: progress.message,
           progress: progress.progress
         })
         
-        // 如果任务完成，更新结果
+        // 如果任务完成，更新对应平台的结果
         if (progress.status === 'completed' && progress.result) {
-          singleResult.value = progress.result
+          if (platform === 'bilibili') {
+            biliResult.value = progress.result
+          } else {
+            youtubeResult.value = progress.result
+          }
           ElMessage.success('获取成功')
         } else if (progress.status === 'failed') {
           ElMessage.error(progress.message || '处理失败')
@@ -166,8 +187,8 @@ onMounted(() => {
     <!-- 主要功能区 -->
     <template v-else>
       <el-tabs v-model="activeTab">
-        <!-- 单个视频查询 -->
-        <el-tab-pane label="单个视频查询" name="single">
+        <!-- B站视频查询 -->
+        <el-tab-pane label="B站视频查询" name="bilibili">
           <div class="search-box">
             <el-input
               v-model="bvid"
@@ -175,25 +196,52 @@ onMounted(() => {
               clearable
               class="input-with-select"
             />
-            <el-button type="primary" @click="getVideoText" :loading="loading">
+            <el-button type="primary" @click="getVideoText('bilibili')" :loading="loading">
               获取字幕
             </el-button>
           </div>
           
-          <!-- 添加进度日志组件 -->
-          <ProcessLog :logs="processLogs" v-if="processLogs.length > 0" />
+          <!-- B站进度日志 -->
+          <ProcessLog :logs="biliLogs" v-if="biliLogs.length > 0" />
           
-          <el-card v-if="singleResult" class="result-card">
+          <el-card v-if="biliResult" class="result-card">
             <template #header>
               <div class="card-header">
-                <span>{{ singleResult.title || singleResult.bvid }}</span>
+                <span>{{ biliResult.title || biliResult.bvid }}</span>
               </div>
             </template>
-            <div class="text-content">{{ singleResult.text }}</div>
+            <div class="text-content">{{ biliResult.text }}</div>
           </el-card>
         </el-tab-pane>
 
-        <!-- 添加配置标签页 -->
+        <!-- YouTube视频查询 -->
+        <el-tab-pane label="YouTube视频查询" name="youtube">
+          <div class="search-box">
+            <el-input
+              v-model="youtubeId"
+              placeholder="请输入YouTube视频ID或完整链接"
+              clearable
+              class="input-with-select"
+            />
+            <el-button type="primary" @click="getVideoText('youtube')" :loading="loading">
+              获取字幕
+            </el-button>
+          </div>
+          
+          <!-- YouTube进度日志 -->
+          <ProcessLog :logs="youtubeLogs" v-if="youtubeLogs.length > 0" />
+          
+          <el-card v-if="youtubeResult" class="result-card">
+            <template #header>
+              <div class="card-header">
+                <span>{{ youtubeResult.title || youtubeResult.id }}</span>
+              </div>
+            </template>
+            <div class="text-content">{{ youtubeResult.text }}</div>
+          </el-card>
+        </el-tab-pane>
+
+        <!-- 系统配置标签页 -->
         <el-tab-pane label="系统配置" name="config">
           <ConfigPanel />
         </el-tab-pane>

@@ -6,6 +6,14 @@ Requests==2.32.3
 uvicorn==0.34.0
 yt_dlp==2025.1.26
 websockets==14.2
+sqlalchemy==2.0.27
+pymysql==1.1.0  # MySQL driver
+mysql-connector-python~=9.2.0
+alembic==1.13.1  # ServiceConfig migration tool
+python-dotenv==1.0.1  # For environment variables management
+click==8.1.7  # For command line tools
 
-# 使用dev版本，包含最新的更新，才能获取到正确的字幕，但是windows有包不能使用
-git+https://github.com/Nemo2011/bilibili-api.git@dev
+
+# Using dev version to get the latest updates for correct subtitle support
+# Note: some packages might not be compatible with Windows
+#git+https://github.com/Nemo2011/bilibili-api.git@dev

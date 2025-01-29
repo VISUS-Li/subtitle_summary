@@ -22,35 +22,76 @@ const loading = ref(false)
 const loadConfigs = async () => {
   try {
     loading.value = true
-    const configs = await configService.getAllConfigs()
-    Object.assign(whisperConfig, configs.whisper)
-    Object.assign(systemConfig, configs.system)
+    const configs = await configService.getAllConfigs('system')
+    if (configs && configs.length > 0) {
+      Object.assign(systemConfig, configs.reduce((acc: any, curr: any) => {
+        acc[curr.config_key] = curr.value
+        return acc
+      }, {} as SystemConfig))
+    } else {
+      // 使用默认配置
+      Object.assign(systemConfig, {
+        max_retries: 3,
+        retry_delay: 5,
+        default_max_results: 5
+      })
+    }
   } catch (error: any) {
-    ElMessage.error('加载配置失败')
+    ElMessage.error('加载系统配置失败，将使用默认配置')
+    // 使用默认配置
+    Object.assign(systemConfig, {
+      max_retries: 3,
+      retry_delay: 5,
+      default_max_results: 5
+    })
   } finally {
     loading.value = false
   }
 }
 
-const saveWhisperConfig = async () => {
+const loadWhisperConfigs = async () => {
   try {
     loading.value = true
-    await configService.setWhisperConfig(whisperConfig)
-    ElMessage.success('Whisper配置保存成功')
+    const configs = await configService.getAllConfigs('whisper')
+    if (configs && configs.length > 0) {
+      Object.assign(whisperConfig, configs.reduce((acc: any, curr: any) => {
+        acc[curr.config_key] = curr.value
+        return acc
+      }, {} as WhisperConfig))
+    } else {
+      // 使用默认配置
+      Object.assign(whisperConfig, {
+        model_name: 'large-v3',
+        language: 'zh',
+        prompt: ''
+      })
+    }
   } catch (error: any) {
-    ElMessage.error('保存失败')
+    ElMessage.error('加载Whisper配置失败，将使用默认配置')
+    // 使用默认配置
+    Object.assign(whisperConfig, {
+      model_name: 'large-v3',
+      language: 'zh',
+      prompt: ''
+    })
   } finally {
     loading.value = false
   }
 }
 
-const saveSystemConfig = async () => {
+const saveConfig = async (type: 'system' | 'whisper') => {
   try {
     loading.value = true
-    await configService.setSystemConfig(systemConfig)
-    ElMessage.success('系统配置保存成功')
+    const config = type === 'system' ? systemConfig : whisperConfig
+    const promises = Object.entries(config).map(([key, value]) =>
+      configService.setServiceConfig(type, key, value)
+    )
+    
+    await Promise.all(promises)
+    ElMessage.success(`${type.charAt(0).toUpperCase() + type.slice(1)}配置保存成功`)
   } catch (error: any) {
-    ElMessage.error('保存失败')
+    console.error(`${type.charAt(0).toUpperCase() + type.slice(1)}配置保存失败:`, error)
+    ElMessage.error(`${type.charAt(0).toUpperCase() + type.slice(1)}配置保存失败`)
   } finally {
     loading.value = false
   }
@@ -58,6 +99,7 @@ const saveSystemConfig = async () => {
 
 onMounted(() => {
   loadConfigs()
+  loadWhisperConfigs()
 })
 </script>
 
@@ -106,7 +148,7 @@ onMounted(() => {
       </el-form-item>
 
       <el-form-item>
-        <el-button type="primary" @click="saveWhisperConfig" :loading="loading">
+        <el-button type="primary" @click="saveConfig('whisper')" :loading="loading">
           保存 Whisper 配置
         </el-button>
       </el-form-item>
@@ -130,7 +172,7 @@ onMounted(() => {
       </el-form-item>
 
       <el-form-item>
-        <el-button type="primary" @click="saveSystemConfig" :loading="loading">
+        <el-button type="primary" @click="saveConfig('system')" :loading="loading">
           保存系统配置
         </el-button>
       </el-form-item>
