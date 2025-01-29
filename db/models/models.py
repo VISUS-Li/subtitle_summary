@@ -31,3 +31,13 @@ class SystemConfig(BaseModel):
     max_retries: int
     retry_delay: int
     default_max_results: int
+
+class DatabaseConfig(BaseModel):
+    """数据库配置模型"""
+    type: str  # 'sqlite', 'postgresql', 'mysql'
+    host: Optional[str] = None
+    port: Optional[int] = None
+    username: Optional[str] = None
+    password: Optional[str] = None
+    database: str
+    charset: Optional[str] = 'utf8mb4'
