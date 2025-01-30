@@ -17,6 +17,18 @@ class YoutubeAPI(BaseVideoAPI):
             'quiet': True
         }
 
+    def _normalize_language_code(self, lang_code: str) -> Optional[str]:
+        """将各种语言代码标准化为 'zh' 或 'en'"""
+        lang_code = lang_code.lower().split('-')[0]  # 提取基础语言代码
+        
+        # 中文变体映射
+        if lang_code in ['zh', 'zho', 'chi']:
+            return 'zh'
+        # 英文变体映射
+        elif lang_code in ['en', 'eng']:
+            return 'en'
+        return None
+
     @retry_on_failure(max_retries=MAX_RETRIES, delay=RETRY_DELAY)
     def get_subtitle(self, video_id: str) -> Optional[str]:
         """使用yt-dlp获取YouTube字幕"""
@@ -30,11 +42,18 @@ class YoutubeAPI(BaseVideoAPI):
                     print(f"未找到字幕: {video_id}")
                     return None
                 
-                # 优先选择中文和英文字幕
-                for lang in ['zh', 'zh-Hans', 'zh-CN', 'en', 'en-US']:
-                    if lang in subs:
+                # 对所有可用字幕进行语言代码标准化
+                normalized_subs = {}
+                for lang_code in subs:
+                    normalized_lang = self._normalize_language_code(lang_code)
+                    if normalized_lang and normalized_lang not in normalized_subs:
+                        normalized_subs[normalized_lang] = subs[lang_code]
+                
+                # 按优先级尝试获取字幕
+                for lang in ['zh', 'en']:
+                    if lang in normalized_subs:
                         print(f"找到{lang}语言字幕")
-                        sub = subs[lang][-1]  # 选择最佳格式
+                        sub = normalized_subs[lang][-1]  # 选择最佳格式
                         return self._download_subtitle(sub['url'])
                 
                 print(f"未找到支持的语言字幕: {video_id}")

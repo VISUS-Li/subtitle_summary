@@ -1,24 +1,26 @@
 import asyncio
+import sys
 import uuid
 from contextvars import copy_context
+
 from fastapi import APIRouter, HTTPException, WebSocket, BackgroundTasks
 from fastapi import WebSocketDisconnect
-import sys
 
+from api.routers.base import VideoProcessor, VideoResponse
 from db.models.subtitle import Platform
-from .base import VideoProcessor, VideoResponse
 from services.bili2text.core.bilibili import BilibiliAPI
+from services.bili2text.core.downloader import AudioDownloader
 from services.bili2text.core.task_manager import TaskManager
-from services.bili2text.core.task_status import TaskStatus
+from services.bili2text.core.transcriber import AudioTranscriber
 from services.bili2text.core.utils import current_task_id
-from services.bili2text.main import Bili2Text
 
 router = APIRouter(prefix="/bili", tags=["bilibili"])
 
 
 class BiliProcessor(VideoProcessor):
-    def __init__(self, bili2text: Bili2Text, bili_api: BilibiliAPI, task_manager: TaskManager):
-        self.bili2text = bili2text
+    def __init__(self, downloader: AudioDownloader, transcriber: AudioTranscriber, bili_api: BilibiliAPI, task_manager: TaskManager):
+        self.downloader = downloader
+        self.transcriber = transcriber
         self.bili_api = bili_api
         self.task_manager = task_manager
 
@@ -46,7 +48,7 @@ class BiliProcessor(VideoProcessor):
 
     async def process_video(self, video_id: str) -> VideoResponse:
         try:
-            result = self.bili2text.downloader.download_media(
+            result = self.downloader.download_media(
                 f"https://www.bilibili.com/video/{video_id}"
             )
 
@@ -111,61 +113,46 @@ class BiliProcessor(VideoProcessor):
         token = None
         try:
             print(f"开始处理视频: {video_id}")
-            result = self.bili2text.downloader.download_media(
+            result = self.downloader.download_media(
                 f"https://www.bilibili.com/video/{video_id}",
                 task_id
             )
 
             if result['type'] == 'subtitle':
                 print("字幕下载完成")
-                self.task_manager.update_task(
-                    task_id,
-                    status=TaskStatus.COMPLETED.value,
-                    progress=100,
-                    result={
-                        "id": video_id,
-                        "text": result['subtitle_text'],
-                        "type": "subtitle"
-                    }
-                )
+                print(f"任务 {task_id} 完成:")
+                print({
+                    "id": video_id,
+                    "text": result['content'],
+                    "type": "subtitle"
+                })
             elif result['type'] == 'audio':
                 print("正在转录音频...")
 
                 def transcribe_audio():
                     current_task_id.set(task_id)
-                    return self.bili2text.transcriber.transcribe_file(
+                    return self.transcriber.transcribe_file(
                         result['content'],
                         result['video_id'],
                         Platform.BILIBILI,
                         task_id
                     )
 
-                text_path = await asyncio.to_thread(copy_context().run, transcribe_audio)
-
-                with open(text_path, 'r', encoding='utf-8') as f:
-                    text = f.read()
+                text = await asyncio.to_thread(copy_context().run, transcribe_audio)
 
                 print("音频转录完成")
-                self.task_manager.update_task(
-                    task_id,
-                    status=TaskStatus.COMPLETED.value,
-                    progress=100,
-                    result={
-                        "id": video_id,
-                        "text": text,
-                        "type": "audio"
-                    }
-                )
+                print(f"任务 {task_id} 完成:")
+                print({
+                    "id": video_id,
+                    "text": text,
+                    "type": "audio"
+                })
 
         except Exception as e:
             error_msg = f"处理视频失败 {video_id}: {str(e)}"
             print(error_msg, file=sys.stderr)
-            self.task_manager.update_task(
-                task_id,
-                status=TaskStatus.FAILED.value,
-                message=error_msg
-            )
-            raise  # 重新抛出异常
+            print(f"任务 {task_id} 失败: {error_msg}")
+            raise
         finally:
             if token is not None:
                 current_task_id.reset(token)
@@ -187,21 +174,15 @@ class BiliProcessor(VideoProcessor):
                     print(error_msg, file=sys.stderr)
 
             print(f"批量处理完成，成功处理 {len(results)}/{len(videos)} 个视频")
-            self.task_manager.update_task(
-                task_id,
-                status=TaskStatus.COMPLETED.value,
-                progress=100,
-                result={"results": [r.dict() for r in results]}
-            )
+            print(f"任务 {task_id} 完成:")
+            print({
+                "results": [r.dict() for r in results]
+            })
 
         except Exception as e:
             error_msg = f"批量处理失败: {str(e)}"
             print(error_msg, file=sys.stderr)
-            self.task_manager.update_task(
-                task_id,
-                status=TaskStatus.FAILED.value,
-                message=error_msg
-            )
+            print(f"任务 {task_id} 失败: {error_msg}")
             raise  # 重新抛出异常
 
 
@@ -213,9 +194,10 @@ def init_bili_processor(tm: TaskManager):
     """初始化B站处理器"""
     global bili_processor
     try:
-        bili_api = BilibiliAPI()  # 使用默认配置或从环境变量获取
-        # bili2text = Bili2Text(task_manager=tm)
-        bili_processor = BiliProcessor(bili2text, bili_api, tm)
+        bili_api = BilibiliAPI()
+        downloader = AudioDownloader(task_manager=tm)
+        transcriber = AudioTranscriber(task_manager=tm)
+        bili_processor = BiliProcessor(downloader, transcriber, bili_api, tm)
         return True
     except Exception as e:
         print(f"初始化B站处理器失败: {str(e)}")

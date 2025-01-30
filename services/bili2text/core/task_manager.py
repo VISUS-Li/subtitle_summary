@@ -19,7 +19,7 @@ class Task:
 
     def to_dict(self) -> Dict[str, Any]:
         return {
-            "status": self.status.value,
+            "status": self.status,
             "progress": self.progress,
             "message": self.message,
             "result": self.result,

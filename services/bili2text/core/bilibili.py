@@ -162,7 +162,7 @@ class BilibiliAPI:
         except Exception as e:
             error_msg = f"获取字幕失败: {str(e)}"
             print(error_msg, file=sys.stderr)
-            raise
+            return None
 
     @retry_on_failure(max_retries=MAX_RETRIES, delay=RETRY_DELAY)
     def get_video_info(self, bvid: str) -> Dict:

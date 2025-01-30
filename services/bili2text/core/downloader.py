@@ -259,7 +259,7 @@ class AudioDownloader(BaseDownloader):
                         'video_id': video_id,
                         'platform': platform
                     }
-            audio_path = str(self.download_dir / f'{video_id}.mp3')
+            audio_path = str(self.download_dir / f'{video_id}')
             ydl_opts = {
                 'format': 'bestaudio/best',
                 'postprocessors': [{
@@ -270,6 +270,7 @@ class AudioDownloader(BaseDownloader):
                 'quiet': True,
                 'progress_hooks': [self._progress_hook]
             }
+            audio_path += ".mp3"
             
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])

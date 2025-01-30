@@ -12,7 +12,7 @@ class SubtitleManager:
     def __init__(self):
         pass
         
-    def get_video_info(self, platform: str, platform_vid: str) -> Optional[Dict]:
+    def get_video_info(self, platform, platform_vid: str) -> Optional[Dict]:
         """获取视频信息"""
         with get_db() as db:
             video = db.query(Video).filter(
