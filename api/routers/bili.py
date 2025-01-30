@@ -3,7 +3,9 @@ import uuid
 from contextvars import copy_context
 from fastapi import APIRouter, HTTPException, WebSocket, BackgroundTasks
 from fastapi import WebSocketDisconnect
+import sys
 
+from db.models.subtitle import Platform
 from .base import VideoProcessor, VideoResponse
 from services.bili2text.core.bilibili import BilibiliAPI
 from services.bili2text.core.task_manager import TaskManager
@@ -108,12 +110,14 @@ class BiliProcessor(VideoProcessor):
     async def _process_video_task(self, video_id: str, task_id: str, is_youtube: bool = False):
         token = None
         try:
+            print(f"开始处理视频: {video_id}")
             result = self.bili2text.downloader.download_media(
                 f"https://www.bilibili.com/video/{video_id}",
                 task_id
             )
 
             if result['type'] == 'subtitle':
+                print("字幕下载完成")
                 self.task_manager.update_task(
                     task_id,
                     status=TaskStatus.COMPLETED.value,
@@ -125,16 +129,14 @@ class BiliProcessor(VideoProcessor):
                     }
                 )
             elif result['type'] == 'audio':
-                self.task_manager.update_task(
-                    task_id,
-                    status=TaskStatus.TRANSCRIBING.value,
-                    progress=50
-                )
+                print("正在转录音频...")
 
                 def transcribe_audio():
                     current_task_id.set(task_id)
                     return self.bili2text.transcriber.transcribe_file(
-                        result['audio_path'],
+                        result['content'],
+                        result['video_id'],
+                        Platform.BILIBILI,
                         task_id
                     )
 
@@ -143,6 +145,7 @@ class BiliProcessor(VideoProcessor):
                 with open(text_path, 'r', encoding='utf-8') as f:
                     text = f.read()
 
+                print("音频转录完成")
                 self.task_manager.update_task(
                     task_id,
                     status=TaskStatus.COMPLETED.value,
@@ -155,32 +158,35 @@ class BiliProcessor(VideoProcessor):
                 )
 
         except Exception as e:
+            error_msg = f"处理视频失败 {video_id}: {str(e)}"
+            print(error_msg, file=sys.stderr)
             self.task_manager.update_task(
                 task_id,
                 status=TaskStatus.FAILED.value,
-                message=str(e)
+                message=error_msg
             )
+            raise  # 重新抛出异常
         finally:
             if token is not None:
                 current_task_id.reset(token)
 
     async def _process_batch_task(self, keyword: str, max_results: int, task_id: str):
         try:
+            print(f"开始批量处理关键词: {keyword}, 最大结果数: {max_results}")
             videos = self.bili_api.search_videos(keyword, max_results)
             results = []
 
             for i, video in enumerate(videos, 1):
                 try:
+                    print(f"正在处理第 {i}/{len(videos)} 个视频: {video['bvid']}")
                     result = await self.process_video(video['bvid'])
                     results.append(result)
-                    self.task_manager.update_task(
-                        task_id,
-                        progress=(i / len(videos)) * 100,
-                        message=f"处理进度: {i}/{len(videos)}"
-                    )
+                    print(f"视频处理完成: {video['bvid']}")
                 except Exception as e:
-                    print(f"处理视频失败 {video['bvid']}: {str(e)}")
+                    error_msg = f"处理视频失败 {video['bvid']}: {str(e)}"
+                    print(error_msg, file=sys.stderr)
 
+            print(f"批量处理完成，成功处理 {len(results)}/{len(videos)} 个视频")
             self.task_manager.update_task(
                 task_id,
                 status=TaskStatus.COMPLETED.value,
@@ -189,11 +195,14 @@ class BiliProcessor(VideoProcessor):
             )
 
         except Exception as e:
+            error_msg = f"批量处理失败: {str(e)}"
+            print(error_msg, file=sys.stderr)
             self.task_manager.update_task(
                 task_id,
                 status=TaskStatus.FAILED.value,
-                message=str(e)
+                message=error_msg
             )
+            raise  # 重新抛出异常
 
 
 # 创建路由处理器实例
@@ -205,7 +214,7 @@ def init_bili_processor(tm: TaskManager):
     global bili_processor
     try:
         bili_api = BilibiliAPI()  # 使用默认配置或从环境变量获取
-        bili2text = Bili2Text(task_manager=tm)
+        # bili2text = Bili2Text(task_manager=tm)
         bili_processor = BiliProcessor(bili2text, bili_api, tm)
         return True
     except Exception as e:

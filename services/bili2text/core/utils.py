@@ -19,12 +19,18 @@ def retry_on_failure(max_retries: int = 3, delay: int = 5) -> Callable:
     def decorator(func: Callable) -> Callable:
         @wraps(func)
         def wrapper(*args, **kwargs) -> Any:
+            last_exception = None
             for attempt in range(max_retries):
                 try:
                     return func(*args, **kwargs)
                 except Exception as e:
+                    last_exception = e
+                    print(f"第 {attempt + 1}/{max_retries} 次尝试失败: {str(e)}", 
+                          file=sys.stderr)
                     if attempt == max_retries - 1:
-                        raise e
+                        print(f"已达到最大重试次数 {max_retries}, 操作失败", 
+                              file=sys.stderr)
+                        raise last_exception
                     time.sleep(delay)
             return None
         return wrapper
@@ -40,20 +46,23 @@ class WSStream:
         self.original_stream = original_stream
 
     def write(self, message):
-        # 首先写入到原始流（控制台）
+        # 确保始终写入到控制台
         self.original_stream.write(message)
+        self.original_stream.flush()  # 立即刷新确保显示
         
         try:
-            # 然后发送到WebSocket
+            # 发送到WebSocket
             task_id = current_task_id.get()
-            if task_id and message.strip():  # 只有当message不为空时才发送
-                # 将消息按行拆分，并逐行发送
+            if task_id and message.strip():
+                # 判断是否是错误消息
+                level = "ERROR" if self.original_stream == original_stderr else "INFO"
                 for line in message.strip().split('\n'):
-                    if line.strip():  # 跳过空行
-                        self.task_manager.add_log(task_id, "INFO", line)
+                    if line.strip():
+                        self.task_manager.add_log(task_id, level, line)
         except Exception as e:
-            # 如果获取task_id失败，只打印到控制台
+            # 确保异常本身也被打印到控制台
             self.original_stream.write(f"WSStream error: {str(e)}\n")
+            self.original_stream.flush()
 
     def flush(self):
         self.original_stream.flush()

@@ -1,4 +1,4 @@
-from typing import List, Union
+from typing import List, Union, Dict
 from services.bili2text.core.downloader import AudioDownloader
 from services.bili2text.core.transcriber import AudioTranscriber
 from services.bili2text.config import get_config
@@ -17,29 +17,37 @@ class Bili2Text:
         # 同步更新transcriber的配置
         self.transcriber.update_config(new_config)
 
-    def process_url(self, url: str) -> str:
-        """处理单个B站URL"""
-        # 获取最新配置
-        config = get_config()
-        
-        result = self.downloader.download_from_url(url)
-        
-        if result['type'] == 'subtitle':
-            # 直接保存字幕文本
-            bv_match = re.search(r'BV\w+', url)
-            output_path = self.output_dir / f"{bv_match.group()}_subtitle.txt"
-            output_path.write_text(result['subtitle_text'], encoding='utf-8')
-            return str(output_path)
-        elif result['type'] == 'audio':
-            # 使用whisper转录音频，每次都使用最新的配置
-            return self.transcriber.transcribe_file(
-                result['audio_path'],
-                model_name=config["DEFAULT_WHISPER_MODEL"],
-                language=config["DEFAULT_LANGUAGE"],
-                prompt=config["DEFAULT_PROMPT"]
-            )
-        else:
-            raise Exception("无法获取视频内容")
+    def process_url(self, url: str, task_id: str = None) -> Dict:
+        """处理单个URL"""
+        try:
+            # 下载媒体
+            result = self.downloader.download_media(url, task_id)
+            
+            if result['type'] == 'subtitle':
+                return {
+                    'type': 'subtitle',
+                    'content': result['content']
+                }
+            elif result['type'] == 'audio':
+                # 转录音频
+                transcribed_text = self.transcriber.transcribe_file(
+                    audio_path=result['content'],
+                    video_id=result['video_id'],  # 使用下载器返回的video_id
+                    task_id=task_id
+                )
+                return {
+                    'type': 'whisper',
+                    'content': transcribed_text
+                }
+                
+        except Exception as e:
+            if task_id and self.task_manager:
+                self.task_manager.update_task(
+                    task_id,
+                    status=TaskStatus.FAILED.value,
+                    message=f"处理失败: {str(e)}"
+                )
+            raise
 
     def process_keyword(
             self,

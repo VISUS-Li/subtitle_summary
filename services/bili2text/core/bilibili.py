@@ -6,6 +6,7 @@ from typing import List, Dict, Optional
 from services.bili2text.config import MAX_RETRIES, RETRY_DELAY
 from services.bili2text.core.utils import retry_on_failure
 from langchain_community.document_loaders import BiliBiliLoader
+import sys
 
 class BilibiliAPI:
     def __init__(self, sessdata=None, bili_jct=None, buvid3=None):
@@ -25,7 +26,7 @@ class BilibiliAPI:
         
         # 初始化会话和WBI密钥
         self.session = requests.Session()
-        self.session.get("https://www.bilibili.com", headers=self.headers)
+        # self.session.get("https://www.bilibili.com", headers=self.headers)
         self.img_key, self.sub_key = self._get_wbi_keys()
 
     def _get_wbi_keys(self) -> tuple:
@@ -107,13 +108,15 @@ class BilibiliAPI:
                             }
                             videos.append(video_info)
                             if len(videos) >= max_results:
+                                print(f"搜索完成，找到 {len(videos)} 个视频")
                                 return videos
             
             print(f"搜索完成，找到 {len(videos)} 个视频")
             return videos
             
         except Exception as e:
-            print(f"搜索视频失败: {str(e)}")
+            error_msg = f"搜索视频失败: {str(e)}"
+            print(error_msg, file=sys.stderr)
             raise
 
     @retry_on_failure(max_retries=MAX_RETRIES, delay=RETRY_DELAY)
@@ -131,6 +134,7 @@ class BilibiliAPI:
             )
             
             # 加载视频信息和字幕
+            print("正在加载视频信息...")
             docs = loader.load()
             
             if not docs:
@@ -145,6 +149,7 @@ class BilibiliAPI:
                 # 检查是否包含标题和描述
                 if "Video Title:" in content and "Transcript:" in content:
                     transcript = content.split("Transcript:")[1].strip()
+                    print("成功获取字幕内容")
                     return transcript
                 # 如果内容不为空但格式不对，可能是错误的字幕
                 else:
@@ -155,5 +160,58 @@ class BilibiliAPI:
             return None
             
         except Exception as e:
-            print(f"获取字幕失败: {str(e)}")
-            return None
+            error_msg = f"获取字幕失败: {str(e)}"
+            print(error_msg, file=sys.stderr)
+            raise
+
+    @retry_on_failure(max_retries=MAX_RETRIES, delay=RETRY_DELAY)
+    def get_video_info(self, bvid: str) -> Dict:
+        """获取视频详细信息"""
+        try:
+            print(f"获取视频信息: {bvid}")
+            # 构建请求参数
+            params = {
+                'bvid': bvid
+            }
+            
+            # 发送请求
+            response = self.session.get(
+                self.view_url,
+                params=params,
+                headers=self.headers
+            )
+            data = response.json()
+            
+            if data['code'] != 0:
+                error_msg = f"获取视频信息失败: {data['message']}"
+                print(error_msg, file=sys.stderr)
+                raise Exception(error_msg)
+                
+            video_data = data['data']
+            
+            # 提取需要的信息
+            video_info = {
+                'id': bvid,
+                'title': video_data.get('title', ''),
+                'author': video_data.get('owner', {}).get('name', ''),
+                'duration': video_data.get('duration', 0),
+                'view_count': video_data.get('stat', {}).get('view', 0),
+                'description': video_data.get('desc', ''),
+                'tags': video_data.get('tag', []),
+                'keywords': [
+                    tag.strip()
+                    for tag in video_data.get('tag', '').split(',')
+                    if tag.strip()
+                ],
+                'pubdate': video_data.get('pubdate', 0),
+                'cid': video_data.get('cid', 0),  # 用于获取字幕
+                'aid': video_data.get('aid', 0)
+            }
+            
+            print(f"成功获取视频信息: {bvid}")
+            return video_info
+            
+        except Exception as e:
+            error_msg = f"获取视频信息失败: {str(e)}"
+            print(error_msg, file=sys.stderr)
+            raise

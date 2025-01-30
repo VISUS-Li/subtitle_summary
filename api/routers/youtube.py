@@ -3,11 +3,13 @@ import uuid
 from contextvars import copy_context
 from typing import List
 import time
+import sys
 
 from fastapi import APIRouter, HTTPException, WebSocket, BackgroundTasks
 from fastapi import WebSocketDisconnect
 from pydantic import BaseModel
 
+from db.models.subtitle import Platform
 from services.bili2text.core.youtube import YoutubeAPI
 from services.bili2text.core.task_manager import TaskManager
 from services.bili2text.core.task_status import TaskStatus
@@ -135,12 +137,8 @@ class YoutubeProcessor:
     async def _process_video_task(self, video_id: str, task_id: str):
         """异步处理视频任务"""
         try:
-            # 更新下载状态
-            self.task_manager.update_task(
-                task_id,
-                status=TaskStatus.DOWNLOADING.value,
-                message="正在下载视频..."
-            )
+            print(f"开始处理视频: {video_id}")
+            print("正在下载视频...")
             
             # 使用asyncio.to_thread执行同步下载操作
             result = await asyncio.to_thread(
@@ -155,6 +153,7 @@ class YoutubeProcessor:
                     self.youtube_api.get_video_info,
                     video_id
                 )
+                print(f"字幕下载完成: {video_info.get('title', '')}")
                 
                 self.task_manager.update_task(
                     task_id,
@@ -168,17 +167,14 @@ class YoutubeProcessor:
                     }
                 )
             elif result['type'] == 'audio':
-                self.task_manager.update_task(
-                    task_id,
-                    status=TaskStatus.TRANSCRIBING.value,
-                    progress=50,
-                    message="正在转录音频..."
-                )
+                print("正在转录音频...")
 
                 # 使用asyncio.to_thread执行转录操作
                 text_path = await asyncio.to_thread(
                     self.bili2text.transcriber.transcribe_file,
                     result['content'],
+                    result['video_id'],
+                    Platform.YOUTUBE,
                     task_id
                 )
 
@@ -190,6 +186,7 @@ class YoutubeProcessor:
                     self.youtube_api.get_video_info,
                     video_id
                 )
+                print(f"音频转录完成: {video_info.get('title', '')}")
 
                 self.task_manager.update_task(
                     task_id,
@@ -204,29 +201,32 @@ class YoutubeProcessor:
                 )
 
         except Exception as e:
+            error_msg = f"处理视频失败 {video_id}: {str(e)}"
+            print(error_msg, file=sys.stderr)
             self.task_manager.update_task(
                 task_id,
                 status=TaskStatus.FAILED.value,
-                message=str(e)
+                message=error_msg
             )
+            raise  # 重新抛出异常
 
     async def _process_batch_task(self, keyword: str, max_results: int, task_id: str):
         try:
+            print(f"开始批量处理关键词: {keyword}, 最大结果数: {max_results}")
             videos = self.youtube_api.search_videos(keyword, max_results)
             results = []
 
             for i, video in enumerate(videos, 1):
                 try:
+                    print(f"正在处理第 {i}/{len(videos)} 个视频: {video['id']}")
                     result = await self.process_video(video['id'])
                     results.append(result)
-                    self.task_manager.update_task(
-                        task_id,
-                        progress=(i / len(videos)) * 100,
-                        message=f"处理进度: {i}/{len(videos)}"
-                    )
+                    print(f"视频处理完成: {video['id']}")
                 except Exception as e:
-                    print(f"处理视频失败 {video['id']}: {str(e)}")
+                    error_msg = f"处理视频失败 {video['id']}: {str(e)}"
+                    print(error_msg, file=sys.stderr)
 
+            print(f"批量处理完成，成功处理 {len(results)}/{len(videos)} 个视频")
             self.task_manager.update_task(
                 task_id,
                 status=TaskStatus.COMPLETED.value,
@@ -235,11 +235,14 @@ class YoutubeProcessor:
             )
 
         except Exception as e:
+            error_msg = f"批量处理失败: {str(e)}"
+            print(error_msg, file=sys.stderr)
             self.task_manager.update_task(
                 task_id,
                 status=TaskStatus.FAILED.value,
-                message=str(e)
+                message=error_msg
             )
+            raise  # 重新抛出异常
 
 # 创建路由处理器实例
 youtube_processor = None

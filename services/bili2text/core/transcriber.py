@@ -1,10 +1,14 @@
 from typing import List, Optional
 import whisper
 from pathlib import Path
+import sys
+
+from db.models.subtitle import SubtitleSource, Platform
 from ..config import OUTPUT_DIR
 from .utils import retry_on_failure
 from .task_status import TaskStatus
 from services.bili2text.config import get_config
+from services.bili2text.core.subtitle_manager import SubtitleManager
 
 
 class AudioTranscriber:
@@ -14,6 +18,7 @@ class AudioTranscriber:
         self.current_model_name = None
         self.task_manager = task_manager
         self.config = config or get_config()
+        self.subtitle_manager = SubtitleManager()
         
     def update_config(self, new_config):
         """更新配置"""
@@ -23,7 +28,7 @@ class AudioTranscriber:
             self.current_model_name = None
             self.model = None
         
-    def load_model(self, model_name: str, task_id: str = None):
+    def load_model(self, model_name: str):
         """加载Whisper模型"""
         # 如果模型名称改变，重新加载模型
         if self.model is None or self.current_model_name != model_name:
@@ -43,36 +48,20 @@ class AudioTranscriber:
             print(f"模型所在设备: {next(self.model.parameters()).device}")
             
     @retry_on_failure(max_retries=3, delay=5)
-    def transcribe_file(
-        self, 
-        audio_path: str, 
-        task_id: str = None,
-        model_name: str = None,
-        language: str = None,
-        prompt: str = None
-    ) -> Optional[str]:
+    def transcribe_file(self, audio_path: str, video_id: str, platform: Platform, task_id: str = None) -> Optional[str]:
         """转录单个音频文件"""
-        # 使用配置中的值或传入的参数
-        model_name = model_name or self.config["DEFAULT_WHISPER_MODEL"]
-        language = language or self.config["DEFAULT_LANGUAGE"]
-        prompt = prompt or self.config["DEFAULT_PROMPT"]
-        
-        self.load_model(model_name, task_id)
-        audio_path = Path(audio_path)
-        
-        if not audio_path.exists():
-            error = FileNotFoundError(f"音频文件不存在: {audio_path}")
-            if task_id and self.task_manager:
-                print(f"Task {task_id}: 音频文件不存在: {audio_path}")
-            raise error
-            
-        print(f"开始转录音频: {audio_path}")
-        
         try:
-            if task_id and self.task_manager:
-                print(f"Task {task_id}: 开始转录音频...")
+            print(f"开始转录音频文件: {audio_path}")
             
-            # 使用transcribe进行转录
+            # 使用配置中的值
+            model_name = self.config["DEFAULT_WHISPER_MODEL"]
+            language = self.config["DEFAULT_LANGUAGE"]
+            prompt = self.config["DEFAULT_PROMPT"]
+            
+            self.load_model(model_name)
+            print("正在使用Whisper模型进行转录...")
+            
+            # 使用whisper进行转录
             result = self.model.transcribe(
                 str(audio_path),
                 initial_prompt=prompt,
@@ -84,41 +73,44 @@ class AudioTranscriber:
                 verbose=True
             )
             
-            text = result["text"]
-            output_path = self.output_dir / f"{audio_path.stem}.txt"
+            print("转录完成，正在保存结果...")
             
-            with open(output_path, "w", encoding="utf-8") as f:
-                f.write(text)
-                
-            if task_id and self.task_manager:
-                print(f"Task {task_id}: 转录完成")
-                
-            print(f"转录完成: {output_path}")
-            return str(output_path)
+            # 保存字幕
+            self.subtitle_manager.save_subtitle(
+                video_id=video_id,
+                content=result,
+                source=SubtitleSource.WHISPER,
+                platform=platform,
+                platform_vid=video_id,
+                language=language,
+                model_name=model_name
+            )
             
+            print("转录结果已保存")
+            return result["text"]
+
         except Exception as e:
-            print(f"转录失败: {str(e)}")
-            if task_id and self.task_manager:
-                print(f"Task {task_id}: 转录失败: {str(e)}")
+            error_msg = f"转录失败: {str(e)}"
+            print(error_msg, file=sys.stderr)
             raise
 
     def transcribe_files(
         self, 
         audio_paths: List[str], 
-        model_name: str = "large-v3",
-        language: str = "zh",
-        prompt: str = ""
+        video_ids: List[str],
+        platform: Platform,
+        task_id: str = None
     ) -> List[str]:
         """转录多个音频文件"""
         output_files = []
         
-        for audio_path in audio_paths:
+        for i, audio_path in enumerate(audio_paths):
             try:
                 output_file = self.transcribe_file(
                     audio_path,
-                    model_name=model_name,
-                    language=language,
-                    prompt=prompt
+                    video_ids[i],
+                    platform,
+                    task_id
                 )
                 if output_file:
                     output_files.append(output_file)

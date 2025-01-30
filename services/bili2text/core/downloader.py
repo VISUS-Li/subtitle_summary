@@ -2,6 +2,7 @@ from typing import List, Optional, Dict
 import yt_dlp
 import re
 from pathlib import Path
+import sys
 
 from yt_dlp.utils import format_bytes, formatSeconds
 
@@ -12,6 +13,8 @@ from .task_status import TaskStatus
 from services.bili2text.core.bilibili import BilibiliAPI
 from services.bili2text.core.youtube import YoutubeAPI
 from .base import BaseDownloader
+from services.bili2text.core.subtitle_manager import SubtitleManager
+from db.models.subtitle import SubtitleSource, Platform
 
 class AudioDownloader(BaseDownloader):
     def __init__(self, task_manager=None):
@@ -24,6 +27,7 @@ class AudioDownloader(BaseDownloader):
         self.task_manager = task_manager
         self.init_bili_api()  # 初始化时立即获取配置
         self.youtube_api = YoutubeAPI()
+        self.subtitle_manager = SubtitleManager()
 
     def init_bili_api(self):
         """从数据库获取最新配置初始化B站API"""
@@ -57,11 +61,8 @@ class AudioDownloader(BaseDownloader):
             filename = filename[:197] + "..."
         return filename.strip('_')
 
-    def _progress_hook(self, task_id: str, d: Dict):
+    def _progress_hook(self, d: Dict):
         """yt-dlp下载进度回调"""
-        if not self.task_manager:
-            return
-            
         if d['status'] == 'downloading':
             # 计算下载进度百分比
             if 'total_bytes' in d and d['total_bytes'] > 0:
@@ -73,30 +74,22 @@ class AudioDownloader(BaseDownloader):
                 
             # 构建进度消息
             speed = d.get('speed', 0)
-            if speed:
-                speed_str = format_bytes(speed) + '/s'
-            else:
-                speed_str = 'N/A'
-                
+            speed_str = format_bytes(speed) + '/s' if speed else 'N/A'
+            
             eta = d.get('eta', 0)
-            if eta:
-                eta_str = formatSeconds(eta)
-            else:
-                eta_str = 'N/A'
-                
-            message = (
-                f"正在下载: {d.get('_percent_str', '0%')} "
+            eta_str = formatSeconds(eta) if eta else 'N/A'
+            
+            print(
+                f"下载进度: {d.get('_percent_str', '0%')} "
                 f"速度: {speed_str} "
                 f"剩余时间: {eta_str}"
             )
                 
-            print(f"[Task {task_id}] Status: {TaskStatus.DOWNLOADING.value}, Progress: {progress}%, Message: {message}")
-                
         elif d['status'] == 'finished':
-            print(f"[Task {task_id}] Status: {TaskStatus.DOWNLOADING.value}, Progress: 100%, Message: 下载完成，准备转换格式")
+            print("下载完成，准备转换格式")
             
         elif d['status'] == 'error':
-            print(f"[Task {task_id}] Status: {TaskStatus.FAILED.value}, Message: 下载失败: {d.get('error', '未知错误')}")
+            print(f"下载失败: {d.get('error', '未知错误')}", file=sys.stderr)
 
     def _get_existing_file(self, video_id: str) -> Optional[Path]:
         """检查是否存在已下载的文件"""
@@ -210,66 +203,97 @@ class AudioDownloader(BaseDownloader):
         raise ValueError("无效的YouTube URL")
 
     def download_media(self, url: str, task_id: str = None) -> Dict:
-        """统一媒体下载接口"""
-        if 'youtube.com' in url or 'youtu.be' in url:
-            return self._download_youtube_media(url, task_id)
-        else:
-            return self._download_bilibili_media(url, task_id)
-
-    def _download_youtube_media(self, url: str, task_id: str) -> Dict:
-        """处理YouTube下载"""
-        result = {'type': None, 'content': None}
-        
-        # 先尝试获取字幕
-        video_id = self._extract_youtube_id(url)
-        subtitle = self.youtube_api.get_subtitle(video_id)
-        
-        if subtitle:
-            result.update({
-                'type': 'subtitle',
-                'content': subtitle
-            })
-        else:
-            # 下载音频逻辑
-            audio_path = self._download_audio(url, task_id)
-            result.update({
+        """下载媒体文件"""
+        try:
+            print(f"开始下载媒体: {url}")
+            video_id = self._extract_video_id(url)
+            platform = Platform.YOUTUBE if 'youtube' in url.lower() else Platform.BILIBILI
+            
+            # 检查数据库中是否存在字幕
+            existing_subtitle = self.subtitle_manager.get_subtitle(video_id)
+            if existing_subtitle:
+                print("找到现有字幕，直接返回")
+                return {
+                    'type': 'subtitle',
+                    'content': existing_subtitle['content'],
+                    'video_id': video_id,
+                    'platform': platform
+                }
+                        
+            # 根据平台选择API
+            api = self.youtube_api if platform == Platform.YOUTUBE else self.bili_api
+            
+            print("获取视频信息...")
+            api_video_info = api.get_video_info(video_id)
+            
+            print("尝试获取官方字幕...")
+            subtitle_text = api.get_subtitle(video_id)
+            if subtitle_text:
+                print("找到官方字幕，保存中...")
+                self.subtitle_manager.save_video_info(api_video_info, platform)
+                self.subtitle_manager.save_subtitle(
+                    video_id=video_id,
+                    content=subtitle_text,
+                    source=SubtitleSource.OFFICIAL,
+                    platform=platform,
+                    platform_vid=video_id,
+                    language='zh'
+                )
+                return {
+                    'type': 'subtitle',
+                    'content': subtitle_text,
+                    'video_id': video_id,
+                    'platform': platform
+                }
+            
+            print("未找到官方字幕，开始下载音频...")
+            # 检查是否有现成的音频文件
+            video_info = self.subtitle_manager.get_video_info(platform, video_id)
+            if video_info and video_info['audio_path']:
+                audio_path = video_info['audio_path']
+                if Path(audio_path).exists():
+                    print(f"找到现有音频文件: {audio_path}")
+                    return {
+                        'type': 'audio',
+                        'content': audio_path,
+                        'video_id': video_id,
+                        'platform': platform
+                    }
+            audio_path = str(self.download_dir / f'{video_id}.mp3')
+            ydl_opts = {
+                'format': 'bestaudio/best',
+                'postprocessors': [{
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': 'mp3',
+                }],
+                'outtmpl': audio_path,
+                'quiet': True,
+                'progress_hooks': [self._progress_hook]
+            }
+            
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([url])
+            
+            print(f"音频下载完成: {audio_path}")
+            print("保存视频信息...")
+            
+            self.subtitle_manager.save_video_info(
+                api_video_info, 
+                platform,
+                audio_path=audio_path
+            )
+            
+            return {
                 'type': 'audio',
-                'content': audio_path
-            })
-            
-        return result
+                'content': audio_path,
+                'video_id': video_id,
+                'platform': platform
+            }
 
-    def _download_bilibili_media(self, url: str, task_id: str = None) -> Dict:
-        """处理B站下载"""
-        self.init_bili_api()
-        
-        bv_match = re.search(r'BV\w+', url)
-        if not bv_match:
-            raise ValueError("无效的B站URL")
-            
-        bvid = bv_match.group()
-        result = {
-            'audio_path': None,
-            'subtitle_text': None,
-            'type': None  # 'subtitle' 或 'audio'
-        }
-        
-        # 先尝试获取字幕
-        subtitle_text = self.bili_api.get_subtitle(bvid)
-        if subtitle_text:
-            print(f"成功获取视频字幕: {bvid}")
-            result['subtitle_text'] = subtitle_text
-            result['type'] = 'subtitle'
-            return result  # 如果获取到字幕，直接返回结果
-            
-        # 只有在没有字幕的情况下才下载音频
-        print(f"未找到字幕，尝试下载音频: {bvid}")
-        audio_path = self._download_audio(url, task_id)
-        if audio_path:
-            result['audio_path'] = audio_path
-            result['type'] = 'audio'
-            
-        return result
+        except Exception as e:
+            error_msg = f"下载失败: {str(e)}"
+            print(error_msg, file=sys.stderr)
+            raise
 
     def batch_download(self, keyword: str, max_results: int = 5) -> List[Dict]:
         """实现批量下载抽象方法"""
