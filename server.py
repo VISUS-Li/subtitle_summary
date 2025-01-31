@@ -1,10 +1,13 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from services.bili2text.core.downloader import AudioDownloader
+from services.bili2text.core.transcriber import AudioTranscriber
 import uvicorn
 from api.routers import bili, config, youtube
 from services.bili2text.core.task_manager import TaskManager
 from services.bili2text.core.utils import redirect_stdout_stderr
+from services.bili2text.core.video_processor import VideoProcessor
 
 # 创建全局task_manager实例
 task_manager = TaskManager()
@@ -14,8 +17,11 @@ task_manager = TaskManager()
 async def lifespan(app: FastAPI):
     # 启动时执行
     print("正在初始化服务...")
-    bili.init_bili_processor(task_manager)
-    youtube.init_youtube_processor(task_manager)
+    downloader = AudioDownloader()
+    transcriber = AudioTranscriber()
+    video_processor = VideoProcessor(downloader, transcriber)
+    bili.init_bili_processor(video_processor)
+    youtube.init_youtube_processor(video_processor)
     print("服务初始化完成")
     
     # 重定向标准输出和错误输出

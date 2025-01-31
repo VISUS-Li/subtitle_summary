@@ -1,17 +1,29 @@
-from typing import Optional, Dict, List, Union
-from datetime import datetime, timedelta
-from db.init.base import get_db
-from db.models.subtitle import Video, Subtitle, SubtitleSource, Platform
-from pathlib import Path
+import sys
 import uuid
 from contextlib import contextmanager
-from sqlalchemy.exc import SQLAlchemyError
-import sys
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Optional, Dict, List, Union
+import re
+
+from db.init.base import get_db
+from db.models.subtitle import Video, Subtitle, SubtitleSource, Platform
+
 
 class SubtitleManager:
-    def __init__(self):
-        pass
-        
+    """字幕管理类，负责字幕和视频信息的数据库操作"""
+
+    @contextmanager
+    def _db_transaction(self):
+        """数据库事务上下文管理器"""
+        with get_db() as db:
+            try:
+                yield db
+                db.commit()
+            except Exception as e:
+                db.rollback()
+                raise
+
     def get_video_info(self, platform, platform_vid: str) -> Optional[Dict]:
         """获取视频信息"""
         with get_db() as db:
@@ -36,17 +48,6 @@ class SubtitleManager:
                 }
         return None
 
-    @contextmanager
-    def transaction(self) -> GeneratorExit:
-        """事务管理器"""
-        with get_db() as db:
-            try:
-                yield db
-                db.commit()
-            except Exception as e:
-                db.rollback()
-                raise
-
     def save_video_info(
         self, 
         video_info: Dict, 
@@ -56,7 +57,7 @@ class SubtitleManager:
         """保存视频信息，返回内部video_id"""
         try:
             print(f"开始保存视频信息: {video_info.get('id')}")
-            with self.transaction() as db:
+            with self._db_transaction() as db:
                 platform_vid = video_info.get('id')
                 
                 video = db.query(Video).filter(
@@ -131,6 +132,7 @@ class SubtitleManager:
         self,
         video_id: str,
         content: Union[str, Dict],  # 可以接收字符串或字典格式的内容
+        timed_content,
         source: SubtitleSource,
         platform: Platform,
         platform_vid: str,
@@ -152,7 +154,7 @@ class SubtitleManager:
             model_name: Whisper模型名称
         """
         try:
-            with self.transaction() as db:
+            with self._db_transaction() as db:
                 # 检查视频是否存在
                 video = db.query(Video).filter(
                     Video.platform == platform,
@@ -165,120 +167,139 @@ class SubtitleManager:
                 
                 # 处理字幕内容
                 pure_text = ""
-                timed_content = None
                 detected_language = language  # 默认使用传入的语言
                 
                 if isinstance(content, str):
-                    # 检查是否为WebVTT格式
                     if "WEBVTT" in content or "-->" in content:
-                        segments = []
+                        # 清理XML标签和时间戳标签
                         lines = content.split('\n')
-                        current_text = []
-                        current_time = None
-                        metadata = {}
+                        cleaned_lines = []
                         
-                        # 解析WebVTT头部信息
                         for line in lines:
-                            line = line.strip()
-                            if line.startswith('Kind:'):
-                                metadata['kind'] = line.split(':', 1)[1].strip()
-                            elif line.startswith('Language:'):
-                                lang = line.split(':', 1)[1].strip()
-                                # 标准化语言代码 (例如 'en-US' -> 'en')
-                                detected_language = lang.split('-')[0].lower()
-                                metadata['language'] = lang
-                            elif '-->' in line:
-                                break
+                            if not line.strip().startswith('WEBVTT') and \
+                               not line.strip().startswith('Kind:') and \
+                               not line.strip().startswith('Language:') and \
+                               not '-->' in line and \
+                               not line.strip().isdigit():
+                                # 首先移除时间戳标签
+                                cleaned_text = re.sub(r'<\d+:\d+:\d+\.\d+>', '', line)
+                                # 然后移除其他XML标签
+                                cleaned_text = re.sub(r'<[^>]+>', '', cleaned_text)
+                                # 移除多余的空格
+                                cleaned_text = ' '.join(cleaned_text.split())
+                                if cleaned_text:
+                                    cleaned_lines.append(cleaned_text)
+                                    
+                        pure_text = ' '.join(cleaned_lines)
                         
-                        # 解析字幕内容
-                        for line in lines:
-                            if '-->' in line:
-                                time_parts = line.split('-->')
-                                start_time = self._parse_timestamp(time_parts[0].strip())
-                                end_time = self._parse_timestamp(time_parts[1].strip())
-                                current_time = {'start': start_time, 'end': end_time}
-                            elif line.strip() and not line.startswith('WEBVTT') and \
-                                 not line.startswith('Kind:') and \
-                                 not line.startswith('Language:') and \
-                                 not line[0].isdigit():
-                                current_text.append(line.strip())
-                            elif not line.strip() and current_time and current_text:
+                        # 只在timed_content为None时处理时间戳内容
+                        if timed_content is None:
+                            metadata = {}
+                            segments = []
+                            current_text = []
+                            current_time = None
+                            
+                            # 解析WebVTT头部信息
+                            for line in lines:
+                                line = line.strip()
+                                if line.startswith('Kind:'):
+                                    metadata['kind'] = line.split(':', 1)[1].strip()
+                                elif line.startswith('Language:'):
+                                    lang = line.split(':', 1)[1].strip()
+                                    detected_language = lang.split('-')[0].lower()
+                                    metadata['language'] = lang
+                                elif '-->' in line:
+                                    break
+                            
+                            # 解析分段
+                            for line in lines:
+                                line = line.strip()
+                                if '-->' in line:
+                                    if current_time and current_text:
+                                        segments.append({
+                                            'start': current_time['start'],
+                                            'end': current_time['end'],
+                                            'text': ' '.join(current_text)
+                                        })
+                                        current_text = []
+                                    
+                                    time_parts = line.split('-->')
+                                    start_time = self._parse_timestamp(time_parts[0].strip())
+                                    end_time = self._parse_timestamp(time_parts[1].strip())
+                                    current_time = {'start': start_time, 'end': end_time}
+                                    
+                                elif line and not line.startswith('WEBVTT') and \
+                                     not line.startswith('Kind:') and \
+                                     not line.startswith('Language:') and \
+                                     not line[0].isdigit() and \
+                                     current_time is not None:
+                                    cleaned_text = re.sub(r'<[^>]+>', '', line)
+                                    cleaned_text = ' '.join(cleaned_text.split())
+                                    if cleaned_text:
+                                        current_text.append(cleaned_text)
+                            
+                            if current_time and current_text:
                                 segments.append({
                                     'start': current_time['start'],
                                     'end': current_time['end'],
                                     'text': ' '.join(current_text)
                                 })
-                                current_text = []
-                                current_time = None
-                        
-                        # 处理最后一段
-                        if current_time and current_text:
-                            segments.append({
-                                'start': current_time['start'],
-                                'end': current_time['end'],
-                                'text': ' '.join(current_text)
-                            })
-                        
-                        pure_text = ' '.join(seg['text'] for seg in segments)
-                        timed_content = {
-                            'type': 'webvtt',
-                            'metadata': metadata,
-                            'segments': segments
-                        }
-                    else:
-                        # 纯文本
-                        pure_text = content
-                elif isinstance(content, dict):
-                    if 'text' in content:
-                        # Whisper格式
-                        pure_text = content['text']
-                        if 'segments' in content:
+                            
                             timed_content = {
-                                'type': 'whisper',
-                                'segments': [
-                                    {
-                                        'start': seg['start'],
-                                        'end': seg['end'],
-                                        'text': seg['text']
-                                    }
-                                    for seg in content['segments']
-                                ]
+                                'type': 'webvtt',
+                                'metadata': metadata,
+                                'segments': segments
                             }
                     else:
-                        # yt-dlp格式
-                        segments = []
-                        texts = []
+                        pure_text = content
                         
-                        # 处理不同格式的时间戳
-                        for key, value in content.items():
-                            if isinstance(key, (int, float)):
-                                # 数字时间戳
-                                start_time = float(key)
-                            else:
-                                # 字符串时间戳 (例如 "00:00:00.320")
-                                start_time = self._parse_timestamp(key)
-                            
-                            segments.append({
-                                'start': start_time,
-                                'text': value
-                            })
-                            texts.append(value)
-                        
-                        pure_text = ' '.join(texts)
-                        timed_content = {
-                            'type': 'yt-dlp',
-                            'segments': sorted(segments, key=lambda x: x['start'])
+                elif isinstance(timed_content, list):
+                    if timed_content is not None:
+                        _timed_content = {
+                            'type': 'whisper',
+                            'segments': [
+                                {
+                                    'start': seg['start'],
+                                    'end': seg['end'],
+                                    'text': seg['text']
+                                }
+                                for seg in timed_content
+                            ]
                         }
+                        timed_content = _timed_content
+                    else:
+                        texts = []
+                        for value in content.values():
+                            texts.append(value)
+                        pure_text = ' '.join(texts)
+                        
+                        if timed_content is None:
+                            segments = []
+                            for key, value in content.items():
+                                if isinstance(key, (int, float)):
+                                    start_time = float(key)
+                                else:
+                                    start_time = self._parse_timestamp(key)
+                                
+                                segments.append({
+                                    'start': start_time,
+                                    'text': value
+                                })
+                            
+                            timed_content = {
+                                'type': 'yt-dlp',
+                                'segments': sorted(segments, key=lambda x: x['start'])
+                            }
                 
                 # 创建字幕记录
                 subtitle = Subtitle(
                     video_id=video.id,
                     platform_vid=video.platform_vid,
-                    platform = platform,
+                    platform=platform,
                     source=source,
                     content=pure_text,
                     timed_content=timed_content,
-                    language=detected_language,  # 使用检测到的语言
+                    language=detected_language,
                     model_name=model_name
                 )
                 db.add(subtitle)
@@ -324,9 +345,9 @@ class SubtitleManager:
             Dict: 字幕信息字典
         """
         try:
-            with self.transaction() as db:
-                subtitle = db.query(Subtitle).filter(
-                    Subtitle.platform_vid == video_id
+            with self._db_transaction() as db:
+                subtitle = db.query(Subtitle).join(Video).filter(
+                    Video.platform_vid == video_id
                 ).first()
                 
                 if subtitle:
@@ -429,3 +450,30 @@ class SubtitleManager:
                     
                 return result
         return None 
+
+    def update_video_search_info(
+        self,
+        platform_vid: str,
+        search_keyword: str,
+        search_rank: int,
+        source_type: str = 'search'
+    ) -> None:
+        """更新视频搜索相关信息"""
+        try:
+            with self._db_transaction() as db:
+                video = db.query(Video).filter(
+                    Video.platform_vid == platform_vid
+                ).first()
+                
+                if video:
+                    video.source_type = source_type
+                    video.search_keyword = search_keyword
+                    video.search_rank = search_rank
+                    video.update_time = datetime.utcnow()
+                    print(f"更新视频搜索信息成功: {platform_vid}")
+                else:
+                    print(f"未找到视频记录: {platform_vid}")
+                    
+        except Exception as e:
+            print(f"更新视频搜索信息失败: {str(e)}")
+            raise 

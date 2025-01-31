@@ -3,9 +3,7 @@ from typing import List, Optional, Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from api.routers import bili
 from db.service_config import ServiceConfig
-from services.bili2text.config import get_config
 
 router = APIRouter(prefix="/config", tags=["config"])
 db = ServiceConfig()

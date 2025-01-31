@@ -30,7 +30,7 @@ def get_config():
         
     except Exception:
         # 如果数据库未初始化或出错，使用默认值
-        max_retries = 3
+        max_retries = 2
         retry_delay = 5
         default_max_results = 5
         model_name = "large-v3"

@@ -50,6 +50,11 @@ class Video(Base):
     create_time = Column(DateTime, default=datetime.utcnow)
     update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+    # 新增字段
+    source_type = Column(String(20), nullable=True)  # 'search' 或 'direct'
+    search_keyword = Column(String(255), nullable=True)  # 搜索关键词
+    search_rank = Column(Integer, nullable=True)  # 搜索结果中的排名
+
     # 关联字幕
     subtitles = relationship("Subtitle", back_populates="video")
 
@@ -63,8 +68,8 @@ class Subtitle(Base):
     platform_vid = Column(String(64), nullable=False)
     platform = Column(Enum(Platform), nullable=False)
     source = Column(Enum(SubtitleSource), nullable=False)
-    content = Column(Text, nullable=False)  # 纯文本内容
-    timed_content = Column(JSON)  # 带时间戳的字幕内容，JSON格式
+    content = Column(Text(length=4294967295), nullable=False)  # 使用 LONGTEXT 类型
+    timed_content = Column(Text(length=4294967295))  # 使用 LONGTEXT 类型，带时间戳的字幕内容
     language = Column(String(10))  # 字幕语言
     model_name = Column(String(50))  # 若为Whisper生成,记录模型名称
     create_time = Column(DateTime, default=datetime.utcnow)

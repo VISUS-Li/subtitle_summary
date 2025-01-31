@@ -14,15 +14,17 @@ export interface SearchResult {
   title: string
   author: string
   duration: string
-  play_count: number
-  bvid: string
+  play_count?: number
+  bvid?: string
+  id?: string
 }
 
 export interface BatchResult {
   title: string
   type: string
   text: string
-  bvid: string
+  bvid?: string
+  id?: string
 }
 
 export interface Progress {

@@ -8,6 +8,7 @@ import ProcessLog from '@/components/ProcessLog.vue'
 import type { Progress } from '@/types/bili'
 import ConfigPanel from '@/components/ConfigPanel.vue'
 import { youtubeService } from '@/services/youtubeService'
+import { API_CONFIG } from '@/config/api'
 
 const activeTab = ref('bilibili')
 const isCookieSet = ref(false)
@@ -34,6 +35,12 @@ const biliResult = ref<VideoResult | null>(null)
 const youtubeResult = ref<VideoResult | null>(null)
 
 const youtubeId = ref('')
+
+// 添加 YouTube 相关的状态
+const youtubeSearchResults = ref<SearchResult[]>([])
+const youtubeMaxResults = ref(5)
+const youtubeKeyword = ref('')
+const youtubeBatchResults = ref<BatchResult[]>([])
 
 const loadServiceConfig = async () => {
   try {
@@ -149,6 +156,60 @@ const searchAndTranscribe = async () => {
   }
 }
 
+// 修改批量处理方法
+const searchAndTranscribeYoutube = async () => {
+  try {
+    loading.value = true
+    if (!youtubeKeyword.value) {
+      ElMessage.warning('请输入关键词')
+      return
+    }
+    
+    const { task_id } = await youtubeService.batchProcess(
+      youtubeKeyword.value, 
+      youtubeMaxResults.value
+    )
+    
+    // 建立WebSocket连接监听进度
+    const ws = new WebSocket(`${API_CONFIG.WS_YOUTUBE}/${task_id}`)
+    
+    ws.onmessage = (event) => {
+      const progress = JSON.parse(event.data)
+      youtubeLogs.value.push(progress)
+      
+      if (progress.result?.videos) {
+        youtubeBatchResults.value = progress.result.videos
+      }
+    }
+    
+  } catch (error: any) {
+    ElMessage.error(error.response?.data?.detail || '处理失败')
+  } finally {
+    loading.value = false
+  }
+}
+
+// 修改搜索方法
+const searchYoutubeVideos = async () => {
+  try {
+    loading.value = true
+    if (!youtubeKeyword.value) {
+      ElMessage.warning('请输入关键词')
+      return
+    }
+    
+    youtubeSearchResults.value = await youtubeService.searchVideos(
+      youtubeKeyword.value,
+      1,  // page
+      20  // pageSize
+    )
+  } catch (error: any) {
+    ElMessage.error(error.response?.data?.detail || '搜索失败')
+  } finally {
+    loading.value = false
+  }
+}
+
 onMounted(() => {
   loadServiceConfig()
 })
@@ -239,6 +300,77 @@ onMounted(() => {
             </template>
             <div class="text-content">{{ youtubeResult.text }}</div>
           </el-card>
+
+          <!-- 添加搜索功能 -->
+          <el-divider>搜索视频</el-divider>
+          <div class="search-box">
+            <el-input
+              v-model="youtubeKeyword"
+              placeholder="请输入搜索关键词"
+              clearable
+              class="input-with-select"
+            />
+            <el-button type="primary" @click="searchYoutubeVideos" :loading="loading">
+              搜索
+            </el-button>
+          </div>
+
+          <!-- 搜索结果列表 -->
+          <el-table
+            v-if="youtubeSearchResults.length > 0"
+            :data="youtubeSearchResults"
+            style="width: 100%"
+          >
+            <el-table-column prop="title" label="标题" />
+            <el-table-column prop="author" label="作者" width="180" />
+            <el-table-column prop="duration" label="时长" width="100" />
+            <el-table-column fixed="right" label="操作" width="120">
+              <template #default="scope">
+                <el-button
+                  link
+                  type="primary"
+                  @click="youtubeId = scope.row.id; getVideoText('youtube')"
+                >
+                  获取字幕
+                </el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+
+          <!-- 批量处理功能 -->
+          <el-divider>批量处理</el-divider>
+          <div class="batch-box">
+            <el-input
+              v-model="youtubeKeyword"
+              placeholder="请输入搜索关键词"
+              clearable
+              class="input-with-select"
+            />
+            <el-input-number
+              v-model="youtubeMaxResults"
+              :min="1"
+              :max="200"
+              placeholder="最大结果数"
+            />
+            <el-button type="primary" @click="searchAndTranscribeYoutube" :loading="loading">
+              批量处理
+            </el-button>
+          </div>
+
+          <!-- 批量处理结果 -->
+          <el-table
+            v-if="youtubeBatchResults.length > 0"
+            :data="youtubeBatchResults"
+            style="width: 100%"
+          >
+            <el-table-column prop="title" label="标题" />
+            <el-table-column prop="type" label="类型" width="120" />
+            <el-table-column prop="text" label="文本内容">
+              <template #default="scope">
+                <div class="text-preview">{{ scope.row.text }}</div>
+              </template>
+            </el-table-column>
+          </el-table>
         </el-tab-pane>
 
         <!-- 系统配置标签页 -->
@@ -247,9 +379,6 @@ onMounted(() => {
         </el-tab-pane>
       </el-tabs>
 
-      <el-button @click="resetCookies" class="reset-button">
-        重置Cookie
-      </el-button>
     </template>
   </div>
 </template>
@@ -295,5 +424,22 @@ onMounted(() => {
 
 .reset-button {
   margin-top: 20px;
+}
+
+.batch-box {
+  display: flex;
+  gap: 10px;
+  margin: 20px 0;
+  align-items: center;
+}
+
+.text-preview {
+  max-height: 100px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+}
+
+.el-input-number {
+  width: 150px;
 }
 </style>

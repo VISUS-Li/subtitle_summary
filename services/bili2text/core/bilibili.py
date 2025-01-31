@@ -3,13 +3,16 @@ import time
 import hashlib
 from urllib.parse import urlencode
 from typing import List, Dict, Optional
+from db.service_config import ServiceConfig
 from services.bili2text.config import MAX_RETRIES, RETRY_DELAY
 from services.bili2text.core.utils import retry_on_failure
 from langchain_community.document_loaders import BiliBiliLoader
 import sys
+import yt_dlp
+
 
 class BilibiliAPI:
-    def __init__(self, sessdata=None, bili_jct=None, buvid3=None):
+    def __init__(self):
         self.search_url = "https://api.bilibili.com/x/web-interface/wbi/search/all/v2"
         self.nav_url = "https://api.bilibili.com/x/web-interface/nav"
         self.view_url = "https://api.bilibili.com/x/web-interface/view"
@@ -18,15 +21,24 @@ class BilibiliAPI:
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
             'Referer': 'https://www.bilibili.com'
         }
-        
+
+        db = ServiceConfig()
+        cookies = {
+            'sessdata': db.get_service_config("bilibili", "sessdata"),
+            'bili_jct': db.get_service_config("bilibili", "bili_jct"),
+            'buvid3': db.get_service_config("bilibili", "buvid3")
+        }
+
+        if not all(cookies.values()):
+            raise ValueError("B站配置不完整")
+
         # 设置cookie
-        self.sessdata = sessdata
-        self.bili_jct = bili_jct 
-        self.buvid3 = buvid3
-        
+        self.sessdata = cookies['sessdata']
+        self.bili_jct = cookies['bili_jct']
+        self.buvid3 = cookies['buvid3']
+
         # 初始化会话和WBI密钥
         self.session = requests.Session()
-        # self.session.get("https://www.bilibili.com", headers=self.headers)
         self.img_key, self.sub_key = self._get_wbi_keys()
 
     def _get_wbi_keys(self) -> tuple:
@@ -36,7 +48,7 @@ class BilibiliAPI:
             data = resp.json()['data']
             img_url = data['wbi_img']['img_url']
             sub_url = data['wbi_img']['sub_url']
-            
+
             img_key = img_url.split('/')[-1].split('.')[0]
             sub_key = sub_url.split('/')[-1].split('.')[0]
             return img_key, sub_key
@@ -79,13 +91,13 @@ class BilibiliAPI:
             list: 包含视频信息的字典列表
         """
         print(f"搜索关键词: {keyword}, 最大结果数: {max_results}")
-        
+
         params = {
             'keyword': keyword,
             'page': 1,
             'order': 'totalrank'
         }
-        
+
         try:
             params = self._sign_params(params)
             response = self.session.get(
@@ -93,7 +105,7 @@ class BilibiliAPI:
                 params=params,
                 headers=self.headers
             ).json()
-            
+
             videos = []
             if 'data' in response and 'result' in response['data']:
                 for result_group in response['data']['result']:
@@ -110,10 +122,10 @@ class BilibiliAPI:
                             if len(videos) >= max_results:
                                 print(f"搜索完成，找到 {len(videos)} 个视频")
                                 return videos
-            
+
             print(f"搜索完成，找到 {len(videos)} 个视频")
             return videos
-            
+
         except Exception as e:
             error_msg = f"搜索视频失败: {str(e)}"
             print(error_msg, file=sys.stderr)
@@ -123,7 +135,7 @@ class BilibiliAPI:
     def get_subtitle(self, bvid: str) -> Optional[str]:
         """获取视频字幕"""
         print(f"尝试获取视频字幕: {bvid}")
-        
+
         try:
             # 创建BiliBiliLoader实例
             loader = BiliBiliLoader(
@@ -132,18 +144,18 @@ class BilibiliAPI:
                 bili_jct=self.bili_jct,
                 buvid3=self.buvid3
             )
-            
+
             # 加载视频信息和字幕
             print("正在加载视频信息...")
             docs = loader.load()
-            
+
             if not docs:
                 print("未找到字幕内容")
                 return None
-                
+
             # 获取第一个文档的内容
             content = docs[0].page_content
-            
+
             # 提取字幕内容
             if content:
                 # 检查是否包含标题和描述
@@ -155,10 +167,10 @@ class BilibiliAPI:
                 else:
                     print("获取到的内容格式不正确，可能是错误的字幕")
                     return None
-                
+
             print("未找到字幕内容")
             return None
-            
+
         except Exception as e:
             error_msg = f"获取字幕失败: {str(e)}"
             print(error_msg, file=sys.stderr)
@@ -173,7 +185,7 @@ class BilibiliAPI:
             params = {
                 'bvid': bvid
             }
-            
+
             # 发送请求
             response = self.session.get(
                 self.view_url,
@@ -181,14 +193,14 @@ class BilibiliAPI:
                 headers=self.headers
             )
             data = response.json()
-            
+
             if data['code'] != 0:
                 error_msg = f"获取视频信息失败: {data['message']}"
                 print(error_msg, file=sys.stderr)
                 raise Exception(error_msg)
-                
+
             video_data = data['data']
-            
+
             # 提取需要的信息
             video_info = {
                 'id': bvid,
@@ -207,11 +219,51 @@ class BilibiliAPI:
                 'cid': video_data.get('cid', 0),  # 用于获取字幕
                 'aid': video_data.get('aid', 0)
             }
-            
+
             print(f"成功获取视频信息: {bvid}")
             return video_info
-            
+
         except Exception as e:
             error_msg = f"获取视频信息失败: {str(e)}"
+            print(error_msg, file=sys.stderr)
+            raise
+
+    def download_audio(self, url: str, output_path: str) -> str:
+        """下载B站音频
+        
+        Args:
+            url: 视频URL
+            output_path: 输出文件路径
+            
+        Returns:
+            str: 下载后的文件路径
+        """
+        try:
+            print(f"开始下载B站音频: {url}")
+            
+            # 配置yt-dlp选项
+            ydl_opts = {
+                'format': 'bestaudio/best',
+                'postprocessors': [{
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': 'mp3',
+                }],
+                'outtmpl': output_path.replace('.mp3', ''),
+                'quiet': True,
+                # B站特定的cookie配置
+                'cookies': {
+                    'SESSDATA': self.sessdata,
+                    'bili_jct': self.bili_jct,
+                    'buvid3': self.buvid3
+                }
+            }
+            
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([url])
+                
+            return output_path
+            
+        except Exception as e:
+            error_msg = f"下载B站音频失败: {str(e)}"
             print(error_msg, file=sys.stderr)
             raise

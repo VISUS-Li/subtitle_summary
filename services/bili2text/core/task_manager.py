@@ -2,7 +2,7 @@ from typing import Dict, Optional, Any, List
 from dataclasses import dataclass, field
 import time
 import uuid
-from .task_status import TaskStatus
+from services.bili2text.core.task_status import TaskStatus
 
 
 @dataclass

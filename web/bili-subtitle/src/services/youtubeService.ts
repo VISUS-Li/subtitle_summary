@@ -57,7 +57,11 @@ export const youtubeService = {
     pageSize = 20
   ): Promise<SearchResult[]> {
     const response = await axios.get(`${API_BASE_URL}/search`, {
-      params: { keyword, page, page_size: pageSize }
+      params: { 
+        keyword,
+        page,
+        page_size: pageSize
+      }
     })
     return response.data
   },
@@ -65,9 +69,12 @@ export const youtubeService = {
   async batchProcess(
     keyword: string,
     maxResults = 5
-  ): Promise<BatchResult[]> {
-    const response = await axios.get(`${API_BASE_URL}/batch`, {
-      params: { keyword, max_results: maxResults }
+  ): Promise<{ task_id: string }> {
+    const response = await axios.post(`${API_BASE_URL}/batch`, null, {
+      params: {
+        keyword,
+        max_results: maxResults
+      }
     })
     return response.data
   }
