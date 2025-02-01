@@ -240,7 +240,7 @@ class AudioDownloader:
             print(error_msg, file=sys.stderr)
             raise
 
-    def search_videos(self, keyword: str, platform: Platform, max_results: int = 200) -> List[Dict]:
+    async def search_videos(self, keyword: str, platform: Platform, max_results: int = 200) -> List[Dict]:
         """搜索视频
         
         Args:
@@ -266,7 +266,7 @@ class AudioDownloader:
             elif platform == Platform.BILIBILI:
                 if not self.bili_api:
                     raise ValueError("B站API未初始化")
-                return self.bili_api.search_videos(keyword, max_results)
+                return await self.bili_api.search_videos(keyword, max_results)
 
             else:
                 raise ValueError(f"不支持的平台: {platform}")

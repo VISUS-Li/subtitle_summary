@@ -15,10 +15,11 @@ engine = create_engine(
     max_overflow=10,
     pool_pre_ping=True,
     pool_recycle=3600,
-    # 添加连接参数
+    # 更新连接参数
     connect_args={
         'charset': 'utf8mb4',
         'use_unicode': True,
+        'collation': 'utf8mb4_unicode_ci'
     }
 )
 

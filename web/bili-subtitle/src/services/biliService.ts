@@ -79,19 +79,44 @@ export const biliService = {
     page = 1,
     pageSize = 20
   ): Promise<SearchResult[]> {
-    const response = await axios.get(`${API_BASE_URL}/search`, {
-      params: { keyword, page, page_size: pageSize }
-    })
-    return response.data
+    try {
+      const response = await axios.get(`${API_BASE_URL}/search`, {
+        params: { 
+          keyword, 
+          page, 
+          page_size: pageSize 
+        }
+      })
+      return response.data
+    } catch (error) {
+      console.error('搜索视频失败:', error)
+      throw error
+    }
   },
 
   async batchProcess(
     keyword: string,
     maxResults = 5
-  ): Promise<BatchResult[]> {
-    const response = await axios.get(`${API_BASE_URL}/batch`, {
-      params: { keyword, max_results: maxResults }
-    })
-    return response.data
+  ): Promise<{ task_id: string }> {
+    try {
+      const response = await axios.post(`${API_BASE_URL}/batch`, null, {
+        params: { 
+          keyword, 
+          max_results: maxResults 
+        }
+      })
+      
+      if (!response.data?.task_id) {
+        throw new Error('Invalid response format')
+      }
+
+      // 建立WebSocket连接监听进度
+      const ws = new WebSocket(`${API_CONFIG.WS_BILI}/${response.data.task_id}`)
+      
+      return { task_id: response.data.task_id }
+    } catch (error) {
+      console.error('批量处理失败:', error)
+      throw error
+    }
   }
 } 

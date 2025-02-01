@@ -75,13 +75,7 @@ class VideoProcessor:
             print(f"开始批量处理关键词: {keyword}, 最大结果数: {max_results}")
             
             # 1. 搜索视频
-            videos = await asyncio.to_thread(
-                self.downloader.search_videos,
-                keyword,
-                platform,
-                max_results
-            )
-            
+            videos = await self.downloader.search_videos(keyword, platform, max_results)
             results = []
             total = len(videos)
             

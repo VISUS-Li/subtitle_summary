@@ -20,30 +20,38 @@ class DatabaseManager:
 
     def _check_and_create_database(self):
         """优化后的数据库创建检查"""
+        # 先尝试连接管理数据库
+        admin_engine = create_engine(
+            f"mysql+mysqlconnector://{DB_CONFIG['user']}:{DB_CONFIG['password']}"
+            f"@{DB_CONFIG['host']}/",
+            connect_args={
+                'connect_timeout': 5,
+                'charset': 'utf8mb4',
+                'use_unicode': True,
+                'collation': 'utf8mb4_unicode_ci'
+            }
+        )
+        
         try:
-            # 先尝试连接目标数据库
-            test_engine = create_engine(
-                f"mysql+mysqlconnector://{DB_CONFIG['user']}:{DB_CONFIG['password']}"
-                f"@{DB_CONFIG['host']}/{DB_CONFIG['database']}",
-                connect_args={'connect_timeout': 2}
-            )
-            with test_engine.connect() as conn:
-                conn.execute(text("SELECT 1"))
-        except Exception as e:
-            # 如果连接失败，创建数据库
-            admin_engine = create_engine(
-                f"mysql+mysqlconnector://{DB_CONFIG['user']}:{DB_CONFIG['password']}"
-                f"@{DB_CONFIG['host']}/",
-                connect_args={'connect_timeout': 5}
-            )
             with admin_engine.connect() as conn:
-                conn.execute(text(
-                    f"CREATE DATABASE {DB_CONFIG['database']} "
-                    f"CHARACTER SET {DB_CONFIG['charset']} "
-                    f"COLLATE {DB_CONFIG['collation']}"
+                # 检查数据库是否存在
+                result = conn.execute(text(
+                    f"SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA "
+                    f"WHERE SCHEMA_NAME = '{DB_CONFIG['database']}'"
                 ))
-                conn.execute(text(f"USE {DB_CONFIG['database']}"))
+                database_exists = result.scalar() is not None
+
+                if not database_exists:
+                    # 数据库不存在时才创建
+                    conn.execute(text(
+                        f"CREATE DATABASE IF NOT EXISTS {DB_CONFIG['database']} "
+                        f"CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+                    ))
+                    print(f"已创建新数据库: {DB_CONFIG['database']}")
+            
+        finally:
             admin_engine.dispose()
+
         self.init_database()
 
     def init_database(self) -> None:

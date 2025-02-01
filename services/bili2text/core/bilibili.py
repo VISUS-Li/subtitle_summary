@@ -9,6 +9,10 @@ from services.bili2text.core.utils import retry_on_failure
 from langchain_community.document_loaders import BiliBiliLoader
 import sys
 import yt_dlp
+import random
+import json
+import asyncio
+from bilibili_api import search
 
 
 class BilibiliAPI:
@@ -30,7 +34,7 @@ class BilibiliAPI:
         }
 
         if not all(cookies.values()):
-            raise ValueError("B站配置不完整")
+            print("B站Cookies未设置")
 
         # 设置cookie
         self.sessdata = cookies['sessdata']
@@ -78,56 +82,176 @@ class BilibiliAPI:
         params['w_rid'] = w_rid
         return params
 
-    @retry_on_failure(max_retries=MAX_RETRIES, delay=RETRY_DELAY)
-    def search_videos(self, keyword: str, max_results: int = 5) -> List[Dict]:
-        """
-        搜索视频并返回结果列表
-        
-        Args:
-            keyword: 搜索关键词
-            max_results: 最大返回结果数量
-            
-        Returns:
-            list: 包含视频信息的字典列表
-        """
-        print(f"搜索关键词: {keyword}, 最大结果数: {max_results}")
-
-        params = {
-            'keyword': keyword,
-            'page': 1,
-            'order': 'totalrank'
-        }
-
+    def search_videos_old(self, keyword: str, max_results: int = 200, batch_size: int = 20) -> List[Dict]:
+        """原始的搜索实现方法"""
         try:
-            params = self._sign_params(params)
-            response = self.session.get(
-                self.search_url,
-                params=params,
-                headers=self.headers
-            ).json()
-
+            print(f"搜索B站视频: {keyword}, 目标数量: {max_results}")
             videos = []
-            if 'data' in response and 'result' in response['data']:
-                for result_group in response['data']['result']:
-                    if result_group['result_type'] == 'video':
-                        for video in result_group['data']:
-                            video_info = {
-                                'bvid': video['bvid'],
-                                'title': video['title'].replace('<em class="keyword">', '').replace('</em>', ''),
-                                'author': video['author'],
-                                'duration': video['duration'],
-                                'play_count': video['play']
-                            }
-                            videos.append(video_info)
-                            if len(videos) >= max_results:
-                                print(f"搜索完成，找到 {len(videos)} 个视频")
-                                return videos
+            remaining = max_results
+            page = 1
 
-            print(f"搜索完成，找到 {len(videos)} 个视频")
+            while remaining > 0:
+                current_batch = min(batch_size, remaining)
+                
+                print(f"获取第{page}页视频，批次大小: {current_batch}")
+                
+                # 构建搜索参数
+                params = {
+                    'keyword': keyword,
+                    'page': page,
+                    'order': 'totalrank'
+                }
+                
+                # 添加WBI签名
+                params = self._sign_params(params)
+                
+                # 发送请求并增加错误处理
+                try:
+                    response = self.session.get(
+                        self.search_url,
+                        params=params,
+                        headers=self.headers,
+                        timeout=10  # 添加超时设置
+                    )
+                    
+                    # 检查响应状态码
+                    response.raise_for_status()
+                    
+                    # 检查响应内容是否为空
+                    if not response.text.strip():
+                        print("收到空响应")
+                        # 添加重试延迟
+                        time.sleep(random.uniform(3, 5))
+                        continue
+                    
+                    # 尝试解析JSON
+                    try:
+                        data = response.json()
+                    except json.JSONDecodeError as je:
+                        print(f"JSON解析失败: {str(je)}")
+                        print(f"响应内容: {response.text[:200]}...")  # 打印部分响应内容以便调试
+                        # 添加重试延迟
+                        time.sleep(random.uniform(3, 5))
+                        continue
+
+                    if 'data' in data and 'result' in data['data']:
+                        batch_videos = []
+                        for result_group in data['data']['result']:
+                            if result_group['result_type'] == 'video':
+                                for video in result_group['data']:
+                                    if len(batch_videos) < current_batch:
+                                        video_info = {
+                                            'id': video['bvid'],
+                                            'title': video['title'].replace('<em class="keyword">', '').replace('</em>', ''),
+                                            'author': video['author'],
+                                            'duration': video['duration'],
+                                            'view_count': video['play'],
+                                            'description': video.get('description', '')
+                                        }
+                                        batch_videos.append(video_info)
+
+                        videos.extend(batch_videos)
+                        print(f"本批次成功获取 {len(batch_videos)} 个视频")
+
+                        # 如果本批次获取的视频数量少于预期，说明没有更多结果
+                        if len(batch_videos) < batch_size:
+                            print("没有更多视频结果")
+                            break
+
+                        remaining -= len(batch_videos)
+                        page += 1
+
+                        # 批次之间添加随机延迟
+                        if remaining > 0:
+                            delay = random.uniform(5, 15)  # 5-15秒随机延迟
+                            print(f"等待 {delay:.1f} 秒后继续下一批次")
+                            time.sleep(delay)
+                    else:
+                        print(f"响应格式异常: {data}")
+                        if data.get('code') == -412:  # 请求被拦截
+                            print("请求被拦截，等待更长时间...")
+                            time.sleep(random.uniform(20, 30))
+                        continue
+
+                except requests.RequestException as e:
+                    print(f"请求失败: {str(e)}")
+                    # 添加重试延迟
+                    time.sleep(random.uniform(5, 10))
+                    continue
+
+            print(f"搜索完成，共找到 {len(videos)} 个视频")
             return videos
 
         except Exception as e:
-            error_msg = f"搜索视频失败: {str(e)}"
+            error_msg = f"B站搜索失败: {str(e)}"
+            print(error_msg, file=sys.stderr)
+            raise
+
+    async def search_videos(self, keyword: str, max_results: int = 200) -> List[Dict]:
+        """使用 bilibili-api 搜索B站视频
+        
+        Args:
+            keyword: 搜索关键词
+            max_results: 最大结果数量
+            
+        Returns:
+            List[Dict]: 搜索结果列表
+        """
+        try:
+            print(f"搜索B站视频: {keyword}, 目标数量: {max_results}")
+            videos = []
+            page = 1
+            
+            while len(videos) < max_results:
+                # 使用 bilibili-api 进行搜索
+                search_result = await search.search_by_type(
+                    keyword,
+                    search_type=search.SearchObjectType.VIDEO,
+                    page=page
+                )
+                
+                if not search_result['result']:
+                    print("没有更多视频结果")
+                    break
+                
+                # 处理搜索结果
+                for video in search_result['result']:
+                    if len(videos) >= max_results:
+                        break
+                        
+                    # 提取更多必要的视频信息
+                    video_info = {
+                        'id': video['bvid'],
+                        'aid': video['aid'],
+                        'title': video['title'].replace('<em class="keyword">', '').replace('</em>', ''),
+                        'author': video['author'],
+                        'duration': video['duration'],
+                        'view_count': video['play'],
+                        'description': video.get('description', ''),
+                        'pubdate': video.get('pubdate', 0),
+                        'cover': video.get('pic', '').lstrip('//'),  # 移除开头的 //
+                        'tags': video.get('tag', '').split(','),
+                        'danmaku_count': video.get('danmaku', 0),
+                        'like_count': video.get('like', 0),
+                        'favorite_count': video.get('favorites', 0),
+                        'comment_count': video.get('review', 0),
+                        'type_name': video.get('typename', '')
+                    }
+                    videos.append(video_info)
+                
+                print(f"第{page}页成功获取 {len(search_result['result'])} 个视频")
+                page += 1
+                
+                # 添加随机延迟
+                delay = random.uniform(3, 5)
+                print(f"等待 {delay:.1f} 秒后继续下一页")
+                await asyncio.sleep(delay)
+            
+            print(f"搜索完成，共找到 {len(videos)} 个视频")
+            return videos
+
+        except Exception as e:
+            error_msg = f"B站搜索失败: {str(e)}"
             print(error_msg, file=sys.stderr)
             raise
 
@@ -250,7 +374,13 @@ class BilibiliAPI:
                 }],
                 'outtmpl': output_path.replace('.mp3', ''),
                 'quiet': True,
-                # B站特定的cookie配置
+                # B站特定的请求配置
+                'sleep_interval_requests': 3,  # 请求间隔最小时间(秒)
+                'ratelimit': 800000,  # 限制下载速度
+                'retries': 3,  # 重试次数
+                'fragment_retries': 3,  # 分片下载重试次数
+                'retry_sleep': 5,  # 重试等待时间(秒)
+                # 添加cookies
                 'cookies': {
                     'SESSDATA': self.sessdata,
                     'bili_jct': self.bili_jct,
