@@ -65,7 +65,10 @@ class AudioTranscriber:
             Exception: 转录失败
         """
         try:
-            print(f"开始转录音频文件: {audio_path}")
+            # 获取视频信息以显示标题
+            video_info = self.subtitle_manager.get_video_info(platform, video_id)
+            video_title = f"「{video_info['title']}」" if video_info and video_info.get('title') else ''
+            print(f"开始转录音频文件 [{platform.value}] {video_id} {video_title}")
 
             # 使用配置中的值
             model_name = self.config["DEFAULT_WHISPER_MODEL"]
@@ -143,7 +146,10 @@ class AudioTranscriber:
 
         for i, (audio_path, video_id) in enumerate(zip(audio_paths, video_ids), 1):
             try:
-                print(f"处理第 {i}/{total} 个文件: {audio_path}")
+                # 获取视频信息以显示标题
+                video_info = self.subtitle_manager.get_video_info(platform, video_id)
+                video_title = f"「{video_info['title']}」" if video_info and video_info.get('title') else ''
+                print(f"处理第 {i}/{total} 个文件 [{platform.value}] {video_id} {video_title}")
                 output_text = self.transcribe_file(
                     audio_path,
                     video_id,

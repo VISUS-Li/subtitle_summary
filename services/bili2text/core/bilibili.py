@@ -219,6 +219,15 @@ class BilibiliAPI:
                     if len(videos) >= max_results:
                         break
                         
+                    # 判断是否为课堂视频
+                    is_course = (
+                        video.get('type') == 'ketang' or  # 类型为课堂
+                        bool(video.get('episode_count_text', '').find('课时') != -1)  # 包含课时信息
+                    )
+                    if is_course:
+                        print(f"跳过课堂视频: {video['title']}")
+                        continue
+                    
                     # 提取更多必要的视频信息
                     video_info = {
                         'id': video['bvid'],

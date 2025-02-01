@@ -1,6 +1,8 @@
+import random
 import re
 import sys
 import os
+import time
 from pathlib import Path
 from typing import List, Dict, Optional
 
@@ -23,6 +25,7 @@ class AudioDownloader:
         self.bili_api = BilibiliAPI()
         self.youtube_api = YoutubeAPI()
         self.subtitle_manager = SubtitleManager()
+        self.last_api_request_time = 0  # 记录上次请求API的时间
 
     def _sanitize_filename(self, filename: str) -> str:
         """清理文件名,移除不合法字符
@@ -82,7 +85,7 @@ class AudioDownloader:
         else:
             bv_match = re.search(r'BV\w+', url)
             if not bv_match:
-                raise ValueError("无效的B站URL")
+                raise ValueError("无效的B站URL:" + url)
             return bv_match.group()
 
     def _verify_downloaded_file(self, file_path: str) -> bool:
@@ -140,10 +143,16 @@ class AudioDownloader:
             video_id = self._extract_video_id(url)
             platform = Platform.YOUTUBE if 'youtube' in url.lower() else Platform.BILIBILI
 
+            # 获取视频信息以显示标题
+            video_info = self.subtitle_manager.get_video_info(platform, video_id)
+            if video_info:
+                video_title = f"「{video_info['title']}」" if video_info.get('title') else ''
+                print(f"数据库中已存在视频信息 [{platform.value}] {video_id} {video_title}")
+            
             # 1. 检查数据库中是否存在字幕
             existing_subtitle = self.subtitle_manager.get_subtitle(video_id)
             if existing_subtitle:
-                print("找到现有字幕,直接返回")
+                print(f"找到现有字幕 [{platform.value}] {video_id} {video_title if video_info else ''}")
                 return {
                     'type': 'subtitle',
                     'content': existing_subtitle['content'],
@@ -151,11 +160,22 @@ class AudioDownloader:
                     'platform': platform
                 }
 
-            # 2. 根据平台选择API
+            # 2. 根据平台选择API并检查请求频率
             api = self.youtube_api if platform == Platform.YOUTUBE else self.bili_api
+            
+            # 对B站API请求进行频率控制
+            if platform == Platform.BILIBILI:
+                current_time = time.time()
+                time_since_last_request = current_time - self.last_api_request_time
+                delay = random.uniform(10, 20)  # 10-20秒随机延迟
+                if time_since_last_request < delay:  # 假设需要10秒间隔
+                    delay = delay - time_since_last_request
+                    print(f"等待 {delay:.1f} 秒以控制请求频率...")
+                    time.sleep(delay)
+                self.last_api_request_time = time.time()
 
             # 3. 获取视频信息
-            print("获取视频信息...")
+            print(f"请求视频信息 [{platform.value}] {video_id} {video_title if video_info else ''}...")
             api_video_info = api.get_video_info(video_id)
 
             # 4. 尝试获取官方字幕
