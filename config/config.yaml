@@ -1,0 +1,9 @@
+coze:
+  base_url: "https://api.coze.cn"
+  app_id: "1131687559777"
+  public_key: "oKukRIMxijt-hY3rhHJCRrMRW_zkNI4Ls54S1pTLFQY"
+  private_key_path: "./pem/private_key.pem"
+  http_timeout: 30
+  workflow_ids:
+    WORKFLOW_CHAT: "actual-workflow-id-1"
+    WORKFLOW_ANALYSIS: "actual-workflow-id-2" 
