@@ -8,13 +8,18 @@ from db.init.config import DB_CONFIG
 # 创建数据库URL
 DATABASE_URL = f"mysql+mysqlconnector://{DB_CONFIG['user']}:{DB_CONFIG['password']}@{DB_CONFIG['host']}/{DB_CONFIG['database']}"
 
-# 创建引擎
+# 创建引擎时添加必要的连接参数
 engine = create_engine(
     DATABASE_URL,
     pool_size=DB_CONFIG['pool_size'],
     max_overflow=10,
     pool_pre_ping=True,
-    pool_recycle=3600
+    pool_recycle=3600,
+    # 添加连接参数
+    connect_args={
+        'charset': 'utf8mb4',
+        'use_unicode': True,
+    }
 )
 
 # 创建会话工厂

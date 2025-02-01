@@ -18,7 +18,7 @@ class YoutubeAPI:
             'verbose': True,
             'no_warnings': False,
             # 调整参数名称和格式
-            'sleep_interval_requests': 5,  # 请求间隔最小时间(秒)
+            'sleep_interval_requests': 3,  # 请求间隔最小时间(秒)
             'ratelimit': 800000,  # 修改这里：使用数字而不是字符串 '800K'
             # 重试配置
             'retries': 2,  # 重试次数

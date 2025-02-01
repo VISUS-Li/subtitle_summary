@@ -253,20 +253,21 @@ class SubtitleManager:
                     else:
                         pure_text = content
                         
-                elif isinstance(timed_content, list):
-                    if timed_content is not None:
-                        _timed_content = {
-                            'type': 'whisper',
-                            'segments': [
-                                {
-                                    'start': seg['start'],
-                                    'end': seg['end'],
-                                    'text': seg['text']
-                                }
-                                for seg in timed_content
-                            ]
-                        }
-                        timed_content = _timed_content
+                elif isinstance(content, dict):
+                    if 'text' in content:
+                        pure_text = content['text']
+                        if timed_content is None and 'segments' in content:
+                            timed_content = {
+                                'type': 'whisper',
+                                'segments': [
+                                    {
+                                        'start': seg['start'],
+                                        'end': seg['end'],
+                                        'text': seg['text']
+                                    }
+                                    for seg in content['segments']
+                                ]
+                            }
                     else:
                         texts = []
                         for value in content.values():

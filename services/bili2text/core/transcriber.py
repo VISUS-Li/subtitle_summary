@@ -89,27 +89,29 @@ class AudioTranscriber:
             )
 
             print("转录完成,正在保存结果...")
-                        # 调用函数转换
+            # 调用函数转换
             webvtt_result = self.convert_to_webvtt(result)
 
             # 打印转换后的结果
             print(webvtt_result)
 
             # 保存字幕
-            self.subtitle_manager.save_subtitle(
-                video_id=video_id,
-                content=result["text"],
-                timed_content=result['segments'],
-                source=SubtitleSource.WHISPER,
-                platform=platform,
-                platform_vid=video_id,
-                language=language,
-                model_name=model_name,
-            )
+            try:
+                self.subtitle_manager.save_subtitle(
+                    video_id=video_id,
+                    content=result["text"],
+                    timed_content=webvtt_result,
+                    source=SubtitleSource.WHISPER,
+                    platform=platform,
+                    platform_vid=video_id,
+                    language=language,
+                    model_name=model_name,
+                )
+            except Exception as e:
+                print(f"保存字幕失败: {str(e)}")
+                raise
 
             print("转录结果已保存")
-
-
 
             return result["text"]
 
@@ -170,11 +172,12 @@ class AudioTranscriber:
             "type": "webvtt",
             "metadata": {
                 "kind": "captions",
-                "language": "en-US" if result["language"] == "en" else result["language"] + "-" + result["language"].upper()
+                "language": "en-US" if result["language"] == "en" else result["language"] + "-" + result[
+                    "language"].upper()
             },
             "segments": []
         }
-        
+
         # 转换每个片段
         for segment in result["segments"]:
             webvtt["segments"].append({
@@ -182,5 +185,5 @@ class AudioTranscriber:
                 "end": round(segment["end"], 2),
                 "text": segment["text"]
             })
-        
+
         return webvtt

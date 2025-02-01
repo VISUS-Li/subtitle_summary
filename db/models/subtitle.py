@@ -68,11 +68,16 @@ class Subtitle(Base):
     platform_vid = Column(String(64), nullable=False)
     platform = Column(Enum(Platform), nullable=False)
     source = Column(Enum(SubtitleSource), nullable=False)
-    content = Column(Text(length=4294967295), nullable=False)  # 使用 LONGTEXT 类型
-    timed_content = Column(Text(length=4294967295))  # 使用 LONGTEXT 类型，带时间戳的字幕内容
-    language = Column(String(10))  # 字幕语言
-    model_name = Column(String(50))  # 若为Whisper生成,记录模型名称
+    # 使用 LONGTEXT 存储纯文本内容
+    content = Column(Text(length=4294967295), nullable=False)
+    # 使用 JSON 类型存储带时间戳的内容，MySQL会自动处理序列化
+    timed_content = Column(JSON, nullable=True)
+    language = Column(String(10))
+    model_name = Column(String(50))
     create_time = Column(DateTime, default=datetime.utcnow)
 
     # 关联视频
     video = relationship("Video", back_populates="subtitles")
+
+    def __repr__(self):
+        return f"<Subtitle(id={self.id}, video_id={self.video_id}, language={self.language})>"

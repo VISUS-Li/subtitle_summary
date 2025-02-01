@@ -164,15 +164,19 @@ class AudioDownloader:
             if subtitle_text:
                 print("找到官方字幕,保存中...")
                 self.subtitle_manager.save_video_info(api_video_info, platform)
-                self.subtitle_manager.save_subtitle(
-                    video_id=video_id,
-                    content=subtitle_text,
-                    timed_content=None,
-                    source=SubtitleSource.OFFICIAL,
-                    platform=platform,
-                    platform_vid=video_id,
-                    language='zh'
-                )
+                try:
+                    self.subtitle_manager.save_subtitle(
+                        video_id=video_id,
+                        content=subtitle_text,
+                        timed_content=None,
+                        source=SubtitleSource.OFFICIAL,
+                        platform=platform,
+                        platform_vid=video_id,
+                        language='zh'
+                    )
+                except Exception as e:
+                    print(f"保存字幕失败: {str(e)}")
+                    raise
                 return {
                     'type': 'subtitle',
                     'content': subtitle_text,
