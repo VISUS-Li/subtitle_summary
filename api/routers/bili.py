@@ -48,8 +48,7 @@ async def get_video_text(bvid: str, background_tasks: BackgroundTasks):
         background_tasks.add_task(
             video_processor.process_single_video,
             bvid,
-            Platform.BILIBILI,
-            task_id
+            Platform.BILIBILI
         )
 
         return {"task_id": task_id}
