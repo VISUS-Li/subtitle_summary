@@ -1,31 +1,57 @@
+import os
 import random
 import re
 import sys
-import os
 import time
 from pathlib import Path
 from typing import List, Dict, Optional
-
-import yt_dlp
-
 from db.models.subtitle import SubtitleSource, Platform
-from services.bili2text.core.bilibili import BilibiliAPI
 from services.bili2text.core.subtitle_manager import SubtitleManager
 from services.bili2text.core.utils import retry_on_failure
-from services.bili2text.core.youtube import YoutubeAPI
 from services.bili2text.config import DOWNLOAD_DIR, MAX_RETRIES, RETRY_DELAY
 
 
 class AudioDownloader:
     """音频下载器,负责从各平台下载音频"""
 
-    def __init__(self):
-        """初始化下载器"""
+    def __init__(self, config_path: str = "config.yaml"):
+        """初始化音频下载器
+        
+        Args:
+            config_path: 配置文件路径，默认为 config.yaml
+        """
         self.download_dir = DOWNLOAD_DIR
-        self.bili_api = BilibiliAPI()
-        self.youtube_api = YoutubeAPI()
-        self.subtitle_manager = SubtitleManager()
+        self._bili_api = None
+        self._youtube_api = None
+        self._subtitle_manager = None
+        self.config_path = config_path
         self.last_api_request_time = 0  # 记录上次请求API的时间
+
+    @property
+    def bili_api(self):
+        if self._bili_api is None:
+            start_time = time.time()
+            print(f"[{time.time()}] 开始导入并初始化B站API...")
+            from services.bili2text.core.bilibili import BilibiliAPI
+            self._bili_api = BilibiliAPI()
+            print(f"[{time.time()}] B站API初始化完成，耗时: {time.time() - start_time:.2f}秒")
+        return self._bili_api
+
+    @property
+    def youtube_api(self):
+        if self._youtube_api is None:
+            start_time = time.time()
+            print(f"[{time.time()}] 开始导入并初始化YouTube API...")
+            from services.bili2text.core.youtube import YoutubeAPI
+            self._youtube_api = YoutubeAPI()
+            print(f"[{time.time()}] YouTube API初始化完成，耗时: {time.time() - start_time:.2f}秒")
+        return self._youtube_api
+
+    @property
+    def subtitle_manager(self):
+        if self._subtitle_manager is None:
+            self._subtitle_manager = SubtitleManager(self.config_path)
+        return self._subtitle_manager
 
     def _sanitize_filename(self, filename: str) -> str:
         """清理文件名,移除不合法字符
@@ -99,18 +125,18 @@ class AudioDownloader:
         """
         # 获取不带扩展名的文件路径
         file_base = os.path.splitext(file_path)[0]
-        
+
         # 检查目录下是否存在以该基础名开头的其他文件
         dir_path = os.path.dirname(file_path)
         base_name = os.path.basename(file_base)
-        
+
         for f in os.listdir(dir_path):
             if f.startswith(base_name):
                 full_path = os.path.join(dir_path, f)
                 if full_path != file_path:  # 如果不是目标mp3文件
                     print(f"发现同名临时文件: {f}")
                     os.remove(full_path)  # 删除临时文件
-        
+
         # 检查目标mp3文件
         if not os.path.exists(file_path):
             return False
@@ -118,11 +144,11 @@ class AudioDownloader:
             # 删除空文件
             os.remove(file_path)
             return False
-        
+
         return True
 
     @retry_on_failure(max_retries=MAX_RETRIES, delay=RETRY_DELAY)
-    def download_media(self, url: str) -> Dict:
+    async def download_media(self, url: str) -> Dict:
         """下载媒体文件
         
         Args:
@@ -148,7 +174,7 @@ class AudioDownloader:
             if video_info:
                 video_title = f"「{video_info['title']}」" if video_info.get('title') else ''
                 print(f"数据库中已存在视频信息 [{platform.value}] {video_id} {video_title}")
-            
+
             # 1. 检查数据库中是否存在字幕
             existing_subtitle = self.subtitle_manager.get_subtitle(video_id)
             if existing_subtitle:
@@ -162,7 +188,7 @@ class AudioDownloader:
 
             # 2. 根据平台选择API并检查请求频率
             api = self.youtube_api if platform == Platform.YOUTUBE else self.bili_api
-            
+
             # 对B站API请求进行频率控制
             if platform == Platform.BILIBILI:
                 current_time = time.time()
@@ -185,7 +211,7 @@ class AudioDownloader:
                 print("找到官方字幕,保存中...")
                 self.subtitle_manager.save_video_info(api_video_info, platform)
                 try:
-                    self.subtitle_manager.save_subtitle(
+                    await self.subtitle_manager.save_subtitle(
                         video_id=video_id,
                         content=subtitle_text,
                         timed_content=None,
@@ -225,15 +251,15 @@ class AudioDownloader:
             # 先检查并删除可能存在的同名文件
             if os.path.exists(audio_path):
                 os.remove(audio_path)
-            
+
             try:
                 audio_path = api.download_audio(url, audio_path)
                 # 验证下载的文件
                 if not self._verify_downloaded_file(audio_path):
                     raise Exception("下载完成但文件无效")
-                
+
                 print(f"音频下载完成: {audio_path}")
-                
+
                 # 保存视频信息
                 print("保存视频信息...")
                 self.subtitle_manager.save_video_info(
@@ -241,14 +267,14 @@ class AudioDownloader:
                     platform,
                     audio_path=audio_path
                 )
-                
+
                 return {
                     'type': 'audio',
                     'content': audio_path,
                     'video_id': video_id,
                     'platform': platform
                 }
-                
+
             except Exception as e:
                 # 如果下载失败，清理可能存在的不完整文件
                 if os.path.exists(audio_path):

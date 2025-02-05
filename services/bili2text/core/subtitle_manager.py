@@ -5,13 +5,29 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, Dict, List, Union
 import re
+import asyncio
 
 from db.init.base import get_db
-from db.models.subtitle import Video, Subtitle, SubtitleSource, Platform
+from db.models.subtitle import Video, Subtitle, SubtitleSource, Platform, SubtitleSummary, GeneratedScript, TaskStatus
+from services.bigmodel.coze import CozeClient
+from services.bigmodel.config import CozeConfig, Config
 
 
 class SubtitleManager:
     """字幕管理类，负责字幕和视频信息的数据库操作"""
+
+    def __init__(self, config_path: str = "config/config.yaml"):
+        """初始化字幕管理器
+        
+        Args:
+            config_path: 配置文件路径，默认为 config.yaml
+        """
+        try:
+            # 从配置文件加载配置
+            config = Config.from_yaml(config_path)
+            self.coze_client = CozeClient(config.coze)
+        except Exception as e:
+            raise Exception(f"初始化 SubtitleManager 失败: {str(e)}")
 
     @contextmanager
     def _db_transaction(self):
@@ -128,7 +144,7 @@ class SubtitleManager:
                 return result
         return None
 
-    def save_subtitle(
+    async def save_subtitle(
         self,
         video_id: str,
         content: Union[str, Dict],  # 可以接收字符串或字典格式的内容
@@ -304,6 +320,13 @@ class SubtitleManager:
                     model_name=model_name
                 )
                 db.add(subtitle)
+                db.flush()  # 确保获取到subtitle.id
+                
+                # 创建异步任务处理字幕总结
+                asyncio.create_task(self._process_subtitle_summary(
+                    subtitle.id,
+                    pure_text
+                ))
                 
         except Exception as e:
             print(f"保存字幕失败: {str(e)}")
@@ -353,6 +376,7 @@ class SubtitleManager:
                 
                 if subtitle:
                     result = {
+                        'id': subtitle.id,
                         'content': subtitle.content,
                         'source': subtitle.source.value,
                         'language': subtitle.language,
@@ -478,3 +502,456 @@ class SubtitleManager:
         except Exception as e:
             print(f"更新视频搜索信息失败: {str(e)}")
             raise 
+
+    def get_subtitle_summary(self, subtitle_id: int) -> Optional[Dict]:
+        """获取字幕总结"""
+        try:
+            with get_db() as db:
+                summary = db.query(SubtitleSummary).filter(
+                    SubtitleSummary.subtitle_id == subtitle_id
+                ).first()
+                
+                if summary:
+                    return {
+                        'content': summary.content,
+                        'create_time': summary.create_time.isoformat() if summary.create_time else None,
+                        'update_time': summary.update_time.isoformat() if summary.update_time else None
+                    }
+                return None
+        except Exception as e:
+            print(f"获取字幕总结失败: {str(e)}")
+            raise
+
+    def save_subtitle_summary(self, subtitle_id: int, content: str) -> None:
+        """保存字幕总结"""
+        try:
+            with self._db_transaction() as db:
+                summary = SubtitleSummary(
+                    subtitle_id=subtitle_id,
+                    content=content
+                )
+                db.add(summary)
+                print(f"字幕总结保存成功: subtitle_id={subtitle_id}")
+        except Exception as e:
+            print(f"保存字幕总结失败: {str(e)}")
+            raise 
+
+    def get_videos_with_subtitles_and_summaries(
+        self,
+        platform: Platform,
+        search_keyword: str
+    ) -> List[Dict]:
+        """获取指定平台和关键词的所有视频信息，包括字幕和总结
+        
+        Args:
+            platform: 平台
+            search_keyword: 搜索关键词
+            
+        Returns:
+            List[Dict]: 视频信息列表
+        """
+        try:
+            with get_db() as db:
+                # 联合查询视频、字幕和总结信息
+                query = (
+                    db.query(Video, Subtitle, SubtitleSummary)
+                    .join(Subtitle, Video.id == Subtitle.video_id)
+                    .outerjoin(SubtitleSummary, Subtitle.id == SubtitleSummary.subtitle_id)
+                    .filter(
+                        Video.platform == platform,
+                        Video.search_keyword == search_keyword
+                    )
+                    .order_by(Video.search_rank)
+                )
+                
+                results = []
+                for video, subtitle, summary in query.all():
+                    video_data = {
+                        'id': video.id,
+                        'platform': video.platform.value,
+                        'title': video.title,
+                        'author': video.author,
+                        'search_rank': video.search_rank,
+                        'subtitle': {
+                            'id': subtitle.id,
+                            'content': subtitle.content,
+                            'language': subtitle.language,
+                            'source': subtitle.source.value
+                        } if subtitle else None,
+                        'summary': {
+                            'content': summary.content,
+                            'create_time': summary.create_time.isoformat() if summary.create_time else None
+                        } if summary else None
+                    }
+                    results.append(video_data)
+                
+                return results
+                
+        except Exception as e:
+            print(f"获取视频信息失败: {str(e)}")
+            raise
+
+    def save_generated_script(
+        self,
+        topic: str,
+        platform: Platform,
+        content: str,
+        video_count: int,
+        videos_data: List[Dict]
+    ) -> int:
+        """保存生成的脚本
+        
+        Args:
+            topic: 主题
+            platform: 平台
+            content: 脚本内容
+            video_count: 涉及的视频数量
+            videos_data: 视频数据列表
+            
+        Returns:
+            int: 生成的脚本ID
+        """
+        try:
+            # 收集相关ID
+            video_ids = []
+            subtitle_ids = []
+            summary_ids = []
+            
+            for video in videos_data:
+                if video.get('id'):
+                    video_ids.append(video['id'])
+                if video.get('subtitle', {}).get('id'):
+                    subtitle_ids.append(video['subtitle']['id'])
+                if video.get('summary', {}).get('id'):
+                    summary_ids.append(video['summary']['id'])
+            
+            with self._db_transaction() as db:
+                script = GeneratedScript(
+                    topic=topic,
+                    platform=platform,
+                    content=content,
+                    video_count=video_count,
+                    video_ids=video_ids,
+                    subtitle_ids=subtitle_ids,
+                    summary_ids=summary_ids
+                )
+                db.add(script)
+                db.flush()
+                
+                print(f"脚本保存成功: id={script.id}, 主题={topic}, 平台={platform.value}")
+                return script.id
+                
+        except Exception as e:
+            print(f"保存生成的脚本失败: {str(e)}")
+            raise
+            
+    def get_generated_script(self, script_id: int) -> Optional[Dict]:
+        """获取生成的脚本及相关信息
+        
+        Args:
+            script_id: 脚本ID
+            
+        Returns:
+            Optional[Dict]: 脚本信息及相关数据
+        """
+        try:
+            with get_db() as db:
+                script = db.query(GeneratedScript).filter(
+                    GeneratedScript.id == script_id
+                ).first()
+                
+                if not script:
+                    return None
+                    
+                # 获取相关视频信息
+                videos = db.query(Video).filter(
+                    Video.id.in_(script.video_ids)
+                ).all()
+                
+                # 获取相关字幕信息
+                subtitles = db.query(Subtitle).filter(
+                    Subtitle.id.in_(script.subtitle_ids)
+                ).all()
+                
+                # 获取相关总结信息
+                summaries = db.query(SubtitleSummary).filter(
+                    SubtitleSummary.id.in_(script.summary_ids)
+                ).all()
+                
+                return {
+                    'id': script.id,
+                    'topic': script.topic,
+                    'platform': script.platform.value,
+                    'content': script.content,
+                    'video_count': script.video_count,
+                    'create_time': script.create_time.isoformat(),
+                    'update_time': script.update_time.isoformat(),
+                    'videos': [
+                        {
+                            'id': v.id,
+                            'title': v.title,
+                            'author': v.author,
+                            'platform_vid': v.platform_vid
+                        }
+                        for v in videos
+                    ],
+                    'subtitles': [
+                        {
+                            'id': s.id,
+                            'content': s.content,
+                            'language': s.language,
+                            'source': s.source.value
+                        }
+                        for s in subtitles
+                    ],
+                    'summaries': [
+                        {
+                            'id': s.id,
+                            'content': s.content,
+                            'create_time': s.create_time.isoformat()
+                        }
+                        for s in summaries
+                    ]
+                }
+                
+        except Exception as e:
+            print(f"获取脚本信息失败: {str(e)}")
+            raise
+            
+    def get_scripts_by_topic(self, topic: str, platform: Optional[Platform] = None) -> List[Dict]:
+        """根据主题获取脚本列表
+        
+        Args:
+            topic: 主题
+            platform: 平台（可选）
+            
+        Returns:
+            List[Dict]: 脚本列表
+        """
+        try:
+            with get_db() as db:
+                query = db.query(GeneratedScript).filter(
+                    GeneratedScript.topic == topic
+                )
+                
+                if platform:
+                    query = query.filter(GeneratedScript.platform == platform)
+                    
+                scripts = query.order_by(GeneratedScript.create_time.desc()).all()
+                
+                return [
+                    {
+                        'id': s.id,
+                        'topic': s.topic,
+                        'platform': s.platform.value,
+                        'content': s.content,
+                        'video_count': s.video_count,
+                        'create_time': s.create_time.isoformat(),
+                        'update_time': s.update_time.isoformat()
+                    }
+                    for s in scripts
+                ]
+                
+        except Exception as e:
+            print(f"获取脚本列表失败: {str(e)}")
+            raise 
+
+    async def _process_subtitle_summary(self, subtitle_id: int, content: str) -> None:
+        """异步处理字幕总结"""
+        try:
+            # 检查是否已存在总结
+            summary = self.get_subtitle_summary(subtitle_id)
+            if summary:
+                print(f"字幕总结已存在: subtitle_id={subtitle_id}")
+                return
+
+            # 异步调用总结工作流
+            summary_result = await self.coze_client.run_summary_workflow(
+                topic=content,
+                subtitle=content,
+                language='zh',
+                title='',
+                source=''
+            )
+            
+            if summary_result:
+                # 保存总结结果
+                self.save_subtitle_summary(subtitle_id, summary_result['summarized_subtitle'])
+                print(f"字幕总结处理完成: subtitle_id={subtitle_id}")
+            else:
+                print(f"生成字幕总结失败: subtitle_id={subtitle_id}")
+                
+        except Exception as e:
+            print(f"处理字幕总结失败: {str(e)}")
+            # 这里我们只记录错误但不抛出异常，保证主流程不受影响 
+
+    async def generate_subtitle_summary(self, subtitle_id: int) -> Optional[Dict]:
+        """生成字幕总结
+        
+        Args:
+            subtitle_id: 字幕ID
+            
+        Returns:
+            Optional[Dict]: 总结结果
+        """
+        try:
+            print(f"开始生成字幕总结: subtitle_id={subtitle_id}")
+            
+            # 获取所需数据
+            video_data = None
+            subtitle_content = None
+            summary_obj = None
+            
+            with self._db_transaction() as db:
+                # 检查字幕是否存在并获取相关数据
+                subtitle = db.query(Subtitle).get(subtitle_id)
+                if not subtitle:
+                    print(f"未找到字幕: subtitle_id={subtitle_id}")
+                    return None
+                    
+                video = db.query(Video).get(subtitle.video_id)
+                if not video:
+                    print(f"未找到视频: video_id={subtitle.video_id}")
+                    return None
+                
+                # 在会话内获取所需数据
+                video_data = {
+                    'search_keyword': video.search_keyword,
+                    'title': video.title,
+                    'platform': video.platform,
+                    'platform_vid': video.platform_vid
+                }
+                subtitle_content = subtitle.content
+                
+                # 检查是否已存在总结
+                summary = db.query(SubtitleSummary).filter(
+                    SubtitleSummary.subtitle_id == subtitle_id
+                ).first()
+                
+                if summary:
+                    if summary.status == TaskStatus.COMPLETED:
+                        print(f"字幕总结已存在: subtitle_id={subtitle_id}")
+                        return {
+                            'content': summary.content,
+                            'status': summary.status.value
+                        }
+                    elif summary.status == TaskStatus.FAILED and summary.retry_count >= 3:
+                        print(f"字幕总结已达到最大重试次数: subtitle_id={subtitle_id}")
+                        return None
+                else:
+                    # 创建新的总结记录
+                    summary = SubtitleSummary(
+                        subtitle_id=subtitle_id,
+                        status=TaskStatus.PROCESSING,
+                        retry_count=1,
+                        last_retry_time=datetime.utcnow()
+                    )
+                    db.add(summary)
+                    db.flush()
+                
+                # 更新现有总结记录的状态
+                if summary.retry_count:
+                    summary.status = TaskStatus.PROCESSING
+                    summary.retry_count += 1
+                    summary.last_retry_time = datetime.utcnow()
+                
+                summary_obj = summary
+            
+            try:
+                print(f"调用 Coze API 生成总结: subtitle_id={subtitle_id}")
+                # 调用总结工作流
+                summary_result = await self.coze_client.run_summary_workflow(
+                    topic=video_data['search_keyword'] or '',
+                    subtitle=subtitle_content,
+                    language='zh',
+                    title=video_data['title'] or '',
+                    source=f"{video_data['platform'].value}:{video_data['platform_vid']}"
+                )
+                
+                if not summary_result:
+                    raise Exception("工作流返回结果为空")
+                
+                # 更新总结内容
+                with self._db_transaction() as db:
+                    summary = db.query(SubtitleSummary).get(summary_obj.id)
+                    if summary:
+                        summary.content = summary_result['summarized_subtitle']
+                        summary.status = TaskStatus.COMPLETED
+                        summary.error_message = None
+                        print(f"字幕总结已完成: subtitle_id={subtitle_id}")
+                        return summary_result
+                        
+            except Exception as e:
+                error_msg = f"生成总结失败: {str(e)}"
+                print(error_msg)
+                
+                # 更新失败状态
+                with self._db_transaction() as db:
+                    summary = db.query(SubtitleSummary).get(summary_obj.id)
+                    if summary:
+                        summary.status = TaskStatus.FAILED
+                        summary.error_message = error_msg
+            
+            return None
+            
+        except Exception as e:
+            print(f"字幕总结处理异常: {str(e)}")
+            return None
+            
+    async def generate_topic_script(self, topic: str, platform: Platform) -> Optional[str]:
+        """为指定主题生成脚本
+        
+        Args:
+            topic: 主题
+            platform: 平台
+            
+        Returns:
+            Optional[str]: 生成的脚本内容
+        """
+        try:
+            # 获取相关视频的字幕和总结
+            videos_data = self.get_videos_with_subtitles_and_summaries(
+                platform=platform,
+                search_keyword=topic
+            )
+            
+            if not videos_data:
+                print(f"未找到相关视频数据: topic={topic}")
+                return None
+                
+            # 构建工作流输入
+            subtitles = []
+            for video in videos_data:
+                if video.get('subtitle') and video.get('summary'):
+                    subtitle_item = {
+                        'subtitle': video['summary'].get('content', ''),
+                        'title': video.get('title', ''),
+                        'language': video['subtitle'].get('language', 'zh')
+                    }
+                    subtitles.append(subtitle_item)
+            
+            if not subtitles:
+                print("没有找到可用的字幕总结")
+                return None
+                
+            # 调用脚本生成工作流
+            script = await self.coze_client.run_script_workflow(
+                topic=topic,
+                subtitles=subtitles
+            )
+            
+            if script:
+                # 保存生成的脚本
+                self.save_generated_script(
+                    topic=topic,
+                    platform=platform,
+                    content=script,
+                    video_count=len(videos_data),
+                    videos_data=videos_data
+                )
+                
+            return script
+            
+        except Exception as e:
+            print(f"生成主题脚本失败: {str(e)}")
+            return None 

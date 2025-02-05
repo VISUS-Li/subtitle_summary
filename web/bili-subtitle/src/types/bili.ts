@@ -6,8 +6,12 @@ export interface CookieForm {
 
 export interface VideoResult {
   title?: string
-  bvid: string
-  text: string
+  bvid?: string
+  id?: string
+  platform: string
+  subtitle?: string
+  summary?: string
+  text?: string
 }
 
 export interface SearchResult {

@@ -9,6 +9,7 @@ import type { Progress } from '@/types/bili'
 import ConfigPanel from '@/components/ConfigPanel.vue'
 import { youtubeService } from '@/services/youtubeService'
 import { API_CONFIG } from '@/config/api'
+import { videoService } from '@/services/videoService'
 
 const activeTab = ref('bilibili')
 const isCookieSet = ref(false)
@@ -41,6 +42,10 @@ const youtubeSearchResults = ref<SearchResult[]>([])
 const youtubeMaxResults = ref(5)
 const youtubeKeyword = ref('')
 const youtubeBatchResults = ref<BatchResult[]>([])
+
+// 添加新的状态
+const videoUrl = ref('')
+const videoResult = ref<VideoResult | null>(null)
 
 const loadServiceConfig = async () => {
   try {
@@ -242,6 +247,25 @@ const searchAndTranscribeYoutube = async () => {
       }
     }
     
+  } catch (error: any) {
+    ElMessage.error(error.response?.data?.detail || '处理失败')
+  } finally {
+    loading.value = false
+  }
+}
+
+// 添加新的处理方法
+const processVideoUrl = async () => {
+  try {
+    loading.value = true
+    if (!videoUrl.value) {
+      ElMessage.warning('请输入视频链接')
+      return
+    }
+
+    const result = await videoService.processVideoUrl(videoUrl.value)
+    videoResult.value = result
+    ElMessage.success('视频处理成功')
   } catch (error: any) {
     ElMessage.error(error.response?.data?.detail || '处理失败')
   } finally {
@@ -484,6 +508,44 @@ onMounted(() => {
           </el-table>
         </el-tab-pane>
 
+        <!-- 视频链接处理 -->
+        <el-tab-pane label="视频链接处理" name="video-url">
+          <div class="search-box">
+            <el-input
+              v-model="videoUrl"
+              placeholder="请输入视频链接(支持B站和YouTube)"
+              clearable
+              class="input-with-select"
+            />
+            <el-button 
+              type="primary" 
+              @click="processVideoUrl" 
+              :loading="loading"
+            >
+              处理视频
+            </el-button>
+          </div>
+
+          <!-- 处理结果展示 -->
+          <el-card v-if="videoResult" class="result-card">
+            <template #header>
+              <div class="card-header">
+                <span>{{ videoResult.title || '处理结果' }}</span>
+              </div>
+            </template>
+            <div class="text-content">
+              <div v-if="videoResult.subtitle">
+                <h4>字幕内容：</h4>
+                <p>{{ videoResult.subtitle }}</p>
+              </div>
+              <div v-if="videoResult.summary">
+                <h4>内容总结：</h4>
+                <p>{{ videoResult.summary }}</p>
+              </div>
+            </div>
+          </el-card>
+        </el-tab-pane>
+
         <!-- 系统配置标签页 -->
         <el-tab-pane label="系统配置" name="config">
           <ConfigPanel />
@@ -552,5 +614,11 @@ onMounted(() => {
 
 .el-input-number {
   width: 150px;
+}
+
+.text-content h4 {
+  margin-top: 15px;
+  margin-bottom: 10px;
+  color: #409EFF;
 }
 </style>

@@ -43,7 +43,9 @@ class BilibiliAPI:
 
         # 初始化会话和WBI密钥
         self.session = requests.Session()
+        start_time = time.time()
         self.img_key, self.sub_key = self._get_wbi_keys()
+        print(f"获取WBI keys耗时: {time.time() - start_time:.2f}秒")
 
     def _get_wbi_keys(self) -> tuple:
         """获取WBI签名所需的keys"""

@@ -59,6 +59,35 @@ class Video(Base):
     subtitles = relationship("Subtitle", back_populates="video")
 
 
+class TaskStatus(enum.Enum):
+    """任务状态"""
+    PENDING = "pending"    # 等待处理
+    PROCESSING = "processing"  # 处理中
+    COMPLETED = "completed"    # 完成
+    FAILED = "failed"      # 失败
+
+
+class SubtitleSummary(Base):
+    """字幕总结表"""
+    __tablename__ = "subtitle_summaries"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    subtitle_id = Column(Integer, ForeignKey("subtitles.id"), nullable=False)
+    content = Column(Text(length=4294967295))  # 总结内容
+    create_time = Column(DateTime, default=datetime.utcnow)
+    update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # 关联字幕
+    subtitle = relationship("Subtitle", back_populates="summary")
+
+    # 添加新字段
+    status = Column(Enum(TaskStatus), nullable=False, default=TaskStatus.PENDING)
+    error_message = Column(Text, nullable=True)  # 错误信息
+    retry_count = Column(Integer, default=0)     # 重试次数
+    workflow_id = Column(String(64), nullable=True)  # Coze工作流ID
+    last_retry_time = Column(DateTime, nullable=True)  # 上次重试时间
+
+
 class Subtitle(Base):
     """字幕信息表"""
     __tablename__ = "subtitles"
@@ -79,5 +108,28 @@ class Subtitle(Base):
     # 关联视频
     video = relationship("Video", back_populates="subtitles")
 
+    # 新增字段
+    summary = relationship("SubtitleSummary", back_populates="subtitle", uselist=False)
+
     def __repr__(self):
         return f"<Subtitle(id={self.id}, video_id={self.video_id}, language={self.language})>"
+
+
+class GeneratedScript(Base):
+    """生成的脚本表"""
+    __tablename__ = "generated_scripts"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    topic = Column(String(255), nullable=False, comment='主题/关键词')
+    platform = Column(Enum(Platform), nullable=False, comment='平台')
+    content = Column(Text(length=4294967295), nullable=False, comment='脚本内容')
+    video_count = Column(Integer, nullable=False, comment='涉及的视频数量')
+    video_ids = Column(JSON, nullable=False, comment='相关视频ID列表')
+    subtitle_ids = Column(JSON, nullable=False, comment='相关字幕ID列表')
+    summary_ids = Column(JSON, nullable=False, comment='相关总结ID列表')
+    
+    create_time = Column(DateTime, default=datetime.utcnow)
+    update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    def __repr__(self):
+        return f"<GeneratedScript(id={self.id}, topic='{self.topic}', platform={self.platform})>"

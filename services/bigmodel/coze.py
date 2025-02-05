@@ -1,4 +1,4 @@
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, List
 import json
 import time
 import jwt
@@ -122,4 +122,86 @@ class CozeClient:
                 }
             }
         except Exception as e:
-            raise Exception(f"执行工作流失败: {str(e)}") 
+            raise Exception(f"执行工作流失败: {str(e)}")
+    
+    def run_summary_workflow(
+        self, 
+        topic: str,
+        subtitle: str,
+        language: str = 'zh',
+        title: str = '',
+        source: str = ''
+    ) -> Dict:
+        """
+        执行字幕总结工作流
+        
+        Args:
+            topic: 主题
+            subtitle: 需要总结的字幕内容
+            language: 语言，默认中文
+            title: 标题
+            source: 来源
+            
+        Returns:
+            Dict: {
+                "association": bool,  # 是否相关
+                "summarized_subtitle": str,  # 总结的字幕内容
+                "score": int  # 相关性得分
+            }
+        """
+        workflow_id = self.config.workflow_ids.get('WORKFLOW_SUMMARY')
+        if not workflow_id:
+            raise ValueError("未配置WORKFLOW_SUMMARY工作流ID")
+            
+        parameters = {
+            "topic": topic,
+            "subtitle": subtitle,
+            "language": language,
+            "title": title,
+            "source": source
+        }
+        
+        result = self.workflow_run(workflow_id, parameters=parameters)
+        
+        try:
+            content = result['data']['content']
+            if isinstance(content, str):
+                content = json.loads(content)
+            return content
+        except Exception as e:
+            raise Exception(f"解析总结工作流返回数据失败: {str(e)}")
+    
+    def run_script_workflow(
+        self, 
+        topic: str,
+        subtitles: List[Dict[str, str]]
+    ) -> str:
+        """
+        执行脚本生成工作流
+        
+        Args:
+            topic: 主题
+            subtitles: 字幕列表，每个字幕包含：
+                - subtitle: 字幕内容
+                - title: 标题
+                - language: 语言
+            
+        Returns:
+            str: 生成的脚本内容
+        """
+        workflow_id = self.config.workflow_ids.get('WORKFLOW_SCRIPT')
+        if not workflow_id:
+            raise ValueError("未配置WORKFLOW_SCRIPT工作流ID")
+        
+        # 验证字幕列表的格式
+        for item in subtitles:
+            if not all(key in item for key in ['subtitle', 'title', 'language']):
+                raise ValueError("字幕列表格式错误，每个字幕必须包含 subtitle、title 和 language 字段")
+            
+        parameters = {
+            "topic": topic,
+            "subtitles": subtitles
+        }
+        
+        result = self.workflow_run(workflow_id, parameters=parameters)
+        return result['data']['content']

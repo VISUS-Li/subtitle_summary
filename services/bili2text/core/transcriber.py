@@ -1,11 +1,8 @@
+import time
 import sys
 from typing import List, Optional
-
-import whisper
-
 from db.models.subtitle import SubtitleSource, Platform
 from services.bili2text.config import get_config
-from services.bili2text.core.subtitle_manager import SubtitleManager
 from services.bili2text.core.utils import retry_on_failure
 from services.bili2text.config import OUTPUT_DIR
 
@@ -20,10 +17,21 @@ class AudioTranscriber:
             config: 配置信息,为None时使用默认配置
         """
         self.output_dir = OUTPUT_DIR
-        self.model = None
+        self._whisper = None
+        self._model = None
         self.current_model_name = None
         self.config = config or get_config()
-        self.subtitle_manager = SubtitleManager()
+        self._subtitle_manager = None
+
+    @property
+    def whisper(self):
+        if self._whisper is None:
+            start_time = time.time()
+            print(f"[{time.time()}] 开始导入 whisper 模块...")
+            import whisper
+            self._whisper = whisper
+            print(f"[{time.time()}] whisper 模块导入完成，耗时: {time.time() - start_time:.2f}秒")
+        return self._whisper
 
     def load_model(self, model_name: str):
         """加载Whisper模型
@@ -32,24 +40,25 @@ class AudioTranscriber:
             model_name: 模型名称
         """
         # 如果模型名称改变,重新加载模型
-        if self.model is None or self.current_model_name != model_name:
-            print(f"正在加载whisper模型：{model_name}")
-            device = "cuda" if whisper.torch.cuda.is_available() else "cpu"
-            print(f"检测到的设备: {device}")
+        if self._model is None or self.current_model_name != model_name:
+            start_time = time.time()
+            print(f"[{time.time()}] 开始加载 whisper 模型：{model_name}")
+            device = "cuda" if self.whisper.torch.cuda.is_available() else "cpu"
+            print(f"[{time.time()}] 检测到的设备: {device}")
             if device == "cuda":
-                print(f"GPU信息: {whisper.torch.cuda.get_device_name(0)}")
+                print(f"[{time.time()}] GPU信息: {self.whisper.torch.cuda.get_device_name(0)}")
 
-            self.model = whisper.load_model(
+            self._model = self.whisper.load_model(
                 model_name,
                 device=device
             )
             self.current_model_name = model_name
-            print("whisper模型加载成功")
+            print(f"[{time.time()}] whisper 模型加载完成，耗时: {time.time() - start_time:.2f}秒")
 
-            print(f"模型所在设备: {next(self.model.parameters()).device}")
+            print(f"模型所在设备: {next(self._model.parameters()).device}")
 
     @retry_on_failure(max_retries=3, delay=5)
-    def transcribe_file(self, audio_path: str, video_id: str, platform: Platform) -> Optional[str]:
+    async def transcribe_file(self, audio_path: str, video_id: str, platform: Platform) -> Optional[str]:
         """转录单个音频文件
         
         Args:
@@ -66,7 +75,7 @@ class AudioTranscriber:
         """
         try:
             # 获取视频信息以显示标题
-            video_info = self.subtitle_manager.get_video_info(platform, video_id)
+            video_info = self._subtitle_manager.get_video_info(platform, video_id)
             video_title = f"「{video_info['title']}」" if video_info and video_info.get('title') else ''
             print(f"开始转录音频文件 [{platform.value}] {video_id} {video_title}")
 
@@ -80,7 +89,7 @@ class AudioTranscriber:
             print("正在使用Whisper模型进行转录...")
 
             # 使用whisper进行转录
-            result = self.model.transcribe(
+            result = self._model.transcribe(
                 str(audio_path),
                 initial_prompt=prompt,
                 language=language,
@@ -100,7 +109,7 @@ class AudioTranscriber:
 
             # 保存字幕
             try:
-                self.subtitle_manager.save_subtitle(
+                await self._subtitle_manager.save_subtitle(
                     video_id=video_id,
                     content=result["text"],
                     timed_content=webvtt_result,
@@ -123,7 +132,7 @@ class AudioTranscriber:
             print(error_msg, file=sys.stderr)
             raise
 
-    def transcribe_files(
+    async def transcribe_files(
             self,
             audio_paths: List[str],
             video_ids: List[str],
@@ -147,10 +156,10 @@ class AudioTranscriber:
         for i, (audio_path, video_id) in enumerate(zip(audio_paths, video_ids), 1):
             try:
                 # 获取视频信息以显示标题
-                video_info = self.subtitle_manager.get_video_info(platform, video_id)
+                video_info = self._subtitle_manager.get_video_info(platform, video_id)
                 video_title = f"「{video_info['title']}」" if video_info and video_info.get('title') else ''
                 print(f"处理第 {i}/{total} 个文件 [{platform.value}] {video_id} {video_title}")
-                output_text = self.transcribe_file(
+                output_text = await self.transcribe_file(
                     audio_path,
                     video_id,
                     platform

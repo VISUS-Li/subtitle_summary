@@ -3,7 +3,7 @@ from pathlib import Path
 
 # 从环境变量获取配置，如果不存在则使用默认值
 DB_CONFIG = {
-    'host': os.getenv('DB_HOST', '10.0.160.86'),
+    'host': os.getenv('DB_HOST', '127.0.0.1'),
     'user': os.getenv('DB_USER', 'visus'),
     'password': os.getenv('DB_PASSWORD', '123456'),
     'database': os.getenv('DB_NAME', 'video2text'),
