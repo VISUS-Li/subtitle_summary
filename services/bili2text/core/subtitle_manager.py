@@ -9,8 +9,8 @@ import asyncio
 
 from db.init.base import get_db
 from db.models.subtitle import Video, Subtitle, SubtitleSource, Platform, SubtitleSummary, GeneratedScript, TaskStatus
-from services.bigmodel.coze import CozeClient
-from services.bigmodel.config import CozeConfig, Config
+from services.coze.coze import CozeClient
+from services.coze.config import CozeConfig, Config
 
 
 class SubtitleManager:
