@@ -615,12 +615,28 @@ class SubtitleManager:
             summary_ids = []
             
             for video in videos_data:
-                if video.get('id'):
-                    video_ids.append(video['id'])
-                if video.get('subtitle', {}).get('id'):
-                    subtitle_ids.append(video['subtitle']['id'])
-                if video.get('point_summary', {}).get('id'):
-                    summary_ids.append(video['point_summary']['id'])
+                # 确保video不为None
+                if not video:
+                    continue
+                    
+                # 获取视频ID
+                video_id = video.get('id')
+                if video_id is not None:
+                    video_ids.append(video_id)
+                
+                # 获取字幕ID
+                subtitle = video.get('subtitle')
+                if subtitle and isinstance(subtitle, dict):
+                    subtitle_id = subtitle.get('id')
+                    if subtitle_id is not None:
+                        subtitle_ids.append(subtitle_id)
+                
+                # 获取总结ID 
+                point_summary = video.get('point_summary')
+                if point_summary and isinstance(point_summary, dict):
+                    summary_id = point_summary.get('id')
+                    if summary_id is not None:
+                        summary_ids.append(summary_id)
             
             with self._db_transaction() as db:
                 script = GeneratedScript(
@@ -753,7 +769,7 @@ class SubtitleManager:
             print(f"获取脚本列表失败: {str(e)}")
             raise 
 
-    async def _process_subtitle_summary(self, topic: str, subtitle_id: int, content: str) -> None:
+    async def process_subtitle_summary(self, topic: str, subtitle_id: int, content: str) -> None:
         """异步处理字幕总结（新流程）"""
         try:
             # 在同一个数据库会话中获取所有需要的信息
@@ -788,6 +804,7 @@ class SubtitleManager:
                 subtitle_language = subtitle.language
                 video_title = video.title
                 video_source_type = video.source_type
+                platform_vid = video.platform_vid
 
             # 在数据库会话外调用外部API
             keypoints_result = await self.coze_client.run_keypoints_workflow(
@@ -798,8 +815,18 @@ class SubtitleManager:
                 source=video_source_type
             )
             
-            if not keypoints_result or not keypoints_result.get('key_points'):
+            if not keypoints_result:
                 print("关键点提取失败")
+                return
+
+            # 检查视频是否与主题相关
+            if not keypoints_result.get('association'):
+                print(f"视频 {platform_vid} 与主题 '{topic}' 无关联")
+                return
+
+            # 检查是否有关键点
+            if not keypoints_result.get('key_points'):
+                print(f"视频 {platform_vid} 未提取到关键点")
                 return
 
             # 直接拼接关键点内容

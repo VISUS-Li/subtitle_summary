@@ -42,7 +42,8 @@ class VideoProcessor:
                 return {
                     'type': 'subtitle',
                     'content': existing_subtitle['content'],
-                    'video_id': video_id
+                    'video_id': video_id,
+                    'transcribe_task': None  # 添加transcribe_task字段，表示无需转写
                 }
             
             # 2. 获取视频信息并尝试获取官方字幕
@@ -112,20 +113,36 @@ class VideoProcessor:
                     # 处理视频并获取结果
                     result = await self.process_single_video(topic, video_id, platform)
 
-                    # 如果有字幕内容，创建总结任务
+                    # 如果有转写任务，等待其完成
+                    if result.get('transcribe_task'):
+                        try:
+                            print(f"等待视频 {video_id} 的转写任务完成...")
+                            content = await asyncio.wait_for(result['transcribe_task'], timeout=600)  # 10分钟超时
+                            result['content'] = content
+                            result['transcribe_task'] = None
+                        except asyncio.TimeoutError:
+                            print(f"视频 {video_id} 的转写任务超时")
+                            continue
+                        except Exception as e:
+                            print(f"视频 {video_id} 的转写任务失败: {str(e)}")
+                            continue
+
+                    # 如果有字幕内容，立即创建并执行总结任务
                     if result.get('type') in ['subtitle', 'audio'] and result.get('content'):
-                        # 获取最新字幕记录
                         subtitle = self.subtitle_manager.get_subtitle(video_id)
                         if subtitle and subtitle.get('id'):
-                            # 创建异步总结任务
                             summary_task = asyncio.create_task(
-                                self.subtitle_manager._process_subtitle_summary(
+                                self.subtitle_manager.process_subtitle_summary(
                                     topic=topic,
                                     subtitle_id=subtitle['id'],
                                     content=subtitle['content']
                                 )
                             )
                             summary_tasks.append(summary_task)
+                            print(f"已开始处理视频 {video_id} 的字幕总结任务")
+                            
+                            # 添加一个小的让步，让事件循环有机会调度任务
+                            await asyncio.sleep(1)
 
                     # 如果实际发生了API请求，更新时间戳
                     if not existing_video:
@@ -194,30 +211,34 @@ class VideoProcessor:
         try:
             print(f"开始下载处理: {url}")
             
-            # 1. 下载媒体 - 修改这里，直接等待异步调用
-            result = await self.downloader.download_media(topic, url)  # 移除 asyncio.to_thread
+            # 1. 下载媒体
+            result = await self.downloader.download_media(topic, url)
             
             # 2. 如果是字幕,直接返回
             if result['type'] == 'subtitle':
                 print("获取到字幕,处理完成")
-                return result
+                return {
+                    **result,
+                    'transcribe_task': None  # 添加transcribe_task字段，表示无需转写
+                }
                 
-            # 3. 如果是音频,进行转写
+            # 3. 如果是音频,创建转写任务但不等待完成
             elif result['type'] == 'audio':
-                print("开始音频转写...")
-                text = await asyncio.to_thread(
-                    self.transcriber.transcribe_file,
-                    topic,
-                    result['content'],
-                    result['video_id'],
-                    platform
+                print("创建音频转写任务...")
+                transcribe_task = asyncio.create_task(
+                    self.transcriber.transcribe_file(
+                        topic,
+                        result['content'],
+                        result['video_id'],
+                        platform
+                    )
                 )
-                print("音频转写完成")
                 
                 return {
                     'type': 'audio',
-                    'content': text,
-                    'video_id': result['video_id']
+                    'content': None,  # 转写尚未完成，content为None
+                    'video_id': result['video_id'],
+                    'transcribe_task': transcribe_task  # 返回转写任务
                 }
                 
         except Exception as e:

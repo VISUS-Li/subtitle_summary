@@ -1,8 +1,10 @@
 import time
 import sys
+import asyncio
 from typing import List, Optional
 from db.models.subtitle import SubtitleSource, Platform
 from services.bili2text.config import get_config
+from services.bili2text.core.subtitle_manager import SubtitleManager
 from services.bili2text.core.utils import retry_on_failure
 from services.bili2text.config import OUTPUT_DIR
 
@@ -21,7 +23,7 @@ class AudioTranscriber:
         self._model = None
         self.current_model_name = None
         self.config = config or get_config()
-        self._subtitle_manager = None
+        self.subtitle_manager = SubtitleManager()
 
     @property
     def whisper(self):
@@ -75,7 +77,7 @@ class AudioTranscriber:
         """
         try:
             # 获取视频信息以显示标题
-            video_info = self._subtitle_manager.get_video_info(platform, video_id)
+            video_info = self.subtitle_manager.get_video_info(platform, video_id)
             video_title = f"「{video_info['title']}」" if video_info and video_info.get('title') else ''
             print(f"开始转录音频文件 [{platform.value}] {video_id} {video_title}")
 
@@ -88,7 +90,7 @@ class AudioTranscriber:
             self.load_model(model_name)
             print("正在使用Whisper模型进行转录...")
 
-            # 使用whisper进行转录
+            # 使用whisper进行转录 - 将耗时操作包装在 to_thread 中
             result = self._model.transcribe(
                 str(audio_path),
                 initial_prompt=prompt,
@@ -104,12 +106,9 @@ class AudioTranscriber:
             # 调用函数转换
             webvtt_result = self.convert_to_webvtt(result)
 
-            # 打印转换后的结果
-            print(webvtt_result)
-
             # 保存字幕
             try:
-                await self._subtitle_manager.save_subtitle(
+                await self.subtitle_manager.save_subtitle(
                     topic=topic,
                     video_id=video_id,
                     content=result["text"],
@@ -125,7 +124,6 @@ class AudioTranscriber:
                 raise
 
             print("转录结果已保存")
-
             return result["text"]
 
         except Exception as e:
