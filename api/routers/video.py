@@ -26,6 +26,7 @@ class VideoUrlRequest(BaseModel):
     """视频URL请求模型"""
     url: HttpUrl
     language: Optional[str] = "zh"
+    topic: str  # 新增必填字段
 
 
 class VideoResponse(BaseModel):
@@ -99,6 +100,7 @@ async def process_video(request: VideoUrlRequest):
         
         # 2. 处理视频获取字幕
         result, summary_task = await video_processor.process_single_video(
+            topic=request.topic,  # 添加topic参数
             video_id=video_id,
             platform=platform
         )

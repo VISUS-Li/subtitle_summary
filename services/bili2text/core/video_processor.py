@@ -19,16 +19,15 @@ class VideoProcessor:
         self.subtitle_manager = SubtitleManager()
         self.last_api_request_time = 0  # 记录上次请求API的时间
 
-    async def process_single_video(self, video_id: str, platform: Platform) -> tuple[Dict, Optional[asyncio.Task]]:
+    async def process_single_video(self, topic: str, video_id: str, platform: Platform) -> Dict:
         """处理单个视频
         
         Args:
+            topic: 主题
             video_id: 视频ID
             platform: 平台(YOUTUBE/BILIBILI)
             task_id: 任务ID(可选)
-            
-        Returns:
-            tuple: (处理结果字典, 总结任务(如果有))
+
         """
         try:
             # 获取视频信息以显示标题
@@ -40,58 +39,32 @@ class VideoProcessor:
             existing_subtitle = self.subtitle_manager.get_subtitle(video_id)
             if existing_subtitle:
                 print(f"找到现有字幕 [{platform.value}] {video_id} {video_title}")
-                
-                # 创建总结任务时增加错误处理
-                summary_task = None
-                if existing_subtitle.get('id'):
-                    try:
-                        print(f"创建字幕总结任务: video_id={video_id}")
-                        summary_task = asyncio.create_task(
-                            self.subtitle_manager.generate_subtitle_summary(existing_subtitle['id'])
-                        )
-                    except Exception as e:
-                        print(f"创建总结任务失败: {str(e)}")
-                        # 继续处理，不让总结任务的失败影响主流程
-                
                 return {
                     'type': 'subtitle',
                     'content': existing_subtitle['content'],
                     'video_id': video_id
-                }, summary_task
+                }
             
             # 2. 获取视频信息并尝试获取官方字幕
             print("获取视频信息...")
             video_url = self._get_video_url(video_id, platform)
-            result = await self._download_and_process(video_url, platform)
+            result = await self._download_and_process(topic, video_url, platform)
             
             # 3. 获取视频标题等信息用于显示
             video_info = self.subtitle_manager.get_video_info(platform, video_id)
             if video_info:
                 result['title'] = video_info.get('title', '')
-            
-            # 4. 如果是字幕类型，创建总结任务
-            summary_task = None
-            if result['type'] == 'subtitle':
-                try:
-                    subtitle = self.subtitle_manager.get_subtitle(video_id)
-                    if subtitle and subtitle.get('id'):
-                        print(f"创建字幕总结任务: video_id={video_id}")
-                        summary_task = asyncio.create_task(
-                            self.subtitle_manager.generate_subtitle_summary(subtitle['id'])
-                        )
-                except Exception as e:
-                    print(f"创建总结任务失败: {str(e)}")
-                    # 继续处理，不让总结任务的失败影响主流程
+
             
             print(f"视频处理完成: {video_id}")
-            return result, summary_task
+            return result
             
         except Exception as e:
             error_msg = f"处理视频失败 {video_id}: {str(e)}"
             print(error_msg, file=sys.stderr)
             raise
 
-    async def process_batch_videos(self, keyword: str, platform: Platform, max_results: int, task_id: str = None) -> List[Dict]:
+    async def process_batch_videos(self, topic: str, keyword: str, platform: Platform, max_results: int) -> List[Dict]:
         """批量处理视频
         
         Args:
@@ -136,13 +109,24 @@ class VideoProcessor:
                             print(f"等待 {delay:.1f} 秒以控制请求频率...")
                             await asyncio.sleep(delay)
                     
-                    # 处理视频并获取总结任务
-                    result, summary_task = await self.process_single_video(video_id, platform)
-                    
-                    # 如果有总结任务，添加到任务列表
-                    if summary_task:
-                        summary_tasks.append(summary_task)
-                    
+                    # 处理视频并获取结果
+                    result = await self.process_single_video(topic, video_id, platform)
+
+                    # 如果有字幕内容，创建总结任务
+                    if result.get('type') in ['subtitle', 'audio'] and result.get('content'):
+                        # 获取最新字幕记录
+                        subtitle = self.subtitle_manager.get_subtitle(video_id)
+                        if subtitle and subtitle.get('id'):
+                            # 创建异步总结任务
+                            summary_task = asyncio.create_task(
+                                self.subtitle_manager._process_subtitle_summary(
+                                    topic=topic,
+                                    subtitle_id=subtitle['id'],
+                                    content=subtitle['content']
+                                )
+                            )
+                            summary_tasks.append(summary_task)
+
                     # 如果实际发生了API请求，更新时间戳
                     if not existing_video:
                         self.last_api_request_time = time.time()
@@ -168,7 +152,7 @@ class VideoProcessor:
                 try:
                     await asyncio.wait_for(
                         asyncio.gather(*summary_tasks, return_exceptions=True),
-                        timeout=300  # 5分钟超时
+                        timeout=1000  # 超时时间调整为10分钟
                     )
                     print("所有字幕总结任务已完成")
                 except asyncio.TimeoutError:
@@ -178,7 +162,7 @@ class VideoProcessor:
             
             # 3. 生成最终脚本
             try:
-                script = await self._generate_final_script(keyword, platform)
+                script = await self._generate_final_script(topic, keyword, platform)
                 if script:
                     print("脚本生成成功")
                     results.append({
@@ -196,7 +180,7 @@ class VideoProcessor:
             print(error_msg, file=sys.stderr)
             raise
 
-    async def _download_and_process(self, url: str, platform: Platform) -> Dict:
+    async def _download_and_process(self, topic: str, url: str, platform: Platform) -> Dict:
         """下载并处理视频
         
         Args:
@@ -211,7 +195,7 @@ class VideoProcessor:
             print(f"开始下载处理: {url}")
             
             # 1. 下载媒体 - 修改这里，直接等待异步调用
-            result = await self.downloader.download_media(url)  # 移除 asyncio.to_thread
+            result = await self.downloader.download_media(topic, url)  # 移除 asyncio.to_thread
             
             # 2. 如果是字幕,直接返回
             if result['type'] == 'subtitle':
@@ -223,6 +207,7 @@ class VideoProcessor:
                 print("开始音频转写...")
                 text = await asyncio.to_thread(
                     self.transcriber.transcribe_file,
+                    topic,
                     result['content'],
                     result['video_id'],
                     platform
@@ -249,24 +234,11 @@ class VideoProcessor:
         else:
             raise ValueError(f"不支持的平台: {platform}") 
 
-    async def _process_subtitle_summary(self, subtitle_id: int, content: str) -> None:
-        """异步处理字幕总结"""
-        try:
-            # 直接调用生成总结方法
-            summary_result = await self.subtitle_manager.generate_subtitle_summary(subtitle_id)
-            if summary_result:
-                print(f"字幕总结处理完成: subtitle_id={subtitle_id}")
-            else:
-                print(f"生成字幕总结失败: subtitle_id={subtitle_id}")
-                
-        except Exception as e:
-            print(f"处理字幕总结失败: {str(e)}")
-
-    async def _generate_final_script(self, topic: str, platform: Platform) -> Optional[str]:
+    async def _generate_final_script(self, topic: str, keyword: str, platform: Platform) -> Optional[str]:
         """生成最终的脚本"""
         try:
             print(f"开始生成主题 '{topic}' 的最终脚本...")
-            script = await self.subtitle_manager.generate_topic_script(topic, platform)
+            script = await self.subtitle_manager.generate_topic_script(topic, keyword, platform)
             if script:
                 print("脚本生成成功")
             return script

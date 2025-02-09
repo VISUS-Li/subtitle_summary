@@ -148,7 +148,7 @@ class AudioDownloader:
         return True
 
     @retry_on_failure(max_retries=MAX_RETRIES, delay=RETRY_DELAY)
-    async def download_media(self, url: str) -> Dict:
+    async def download_media(self, topic: str, url: str) -> Dict:
         """下载媒体文件
         
         Args:
@@ -212,6 +212,7 @@ class AudioDownloader:
                 self.subtitle_manager.save_video_info(api_video_info, platform)
                 try:
                     await self.subtitle_manager.save_subtitle(
+                        topic=topic,
                         video_id=video_id,
                         content=subtitle_text,
                         timed_content=None,

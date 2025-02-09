@@ -45,7 +45,11 @@ const youtubeBatchResults = ref<BatchResult[]>([])
 
 // 添加新的状态
 const videoUrl = ref('')
+const videoTopic = ref('')
 const videoResult = ref<VideoResult | null>(null)
+
+const biliTopic = ref('')
+const youtubeTopic = ref('')
 
 const loadServiceConfig = async () => {
   try {
@@ -81,8 +85,10 @@ const resetCookies = () => {
 const getVideoText = async (platform: 'bilibili' | 'youtube') => {
   try {
     const videoId = platform === 'bilibili' ? bvid.value : youtubeId.value
-    if (!videoId) {
-      ElMessage.warning(`请输入有效的${platform === 'bilibili' ? 'BV号' : 'YouTube视频ID'}或视频链接`)
+    const topic = platform === 'bilibili' ? biliTopic.value : youtubeTopic.value
+    
+    if (!videoId || !topic) {
+      ElMessage.warning(`请输入有效的${platform === 'bilibili' ? 'BV号' : 'YouTube视频ID'}和主题描述`)
       return
     }
 
@@ -99,6 +105,7 @@ const getVideoText = async (platform: 'bilibili' | 'youtube') => {
     // 根据平台选择服务
     const service = platform === 'bilibili' ? biliService : youtubeService
     const result = await service.getVideoTextWithProgress(
+      topic,
       videoId,
       (progress) => {
         // 更新对应平台的日志
@@ -153,7 +160,7 @@ const searchAndTranscribe = async () => {
       return
     }
     
-    batchResults.value = await biliService.batchProcess(keyword.value, maxResults.value)
+    batchResults.value = await biliService.batchProcess(biliTopic.value, keyword.value, maxResults.value)
   } catch (error: any) {
     ElMessage.error(error.response?.data?.detail || '处理失败')
   } finally {
@@ -169,8 +176,13 @@ const searchAndTranscribeBilibili = async () => {
       ElMessage.warning('请输入关键词')
       return
     }
+    if (!biliTopic.value) {
+      ElMessage.warning('请输入主题描述')
+      return
+    }
     
     const { task_id } = await biliService.batchProcess(
+      biliTopic.value,
       keyword.value, 
       maxResults.value
     )
@@ -229,8 +241,13 @@ const searchAndTranscribeYoutube = async () => {
       ElMessage.warning('请输入关键词')
       return
     }
+    if (!youtubeTopic.value) {
+      ElMessage.warning('请输入主题描述')
+      return
+    }
     
     const { task_id } = await youtubeService.batchProcess(
+      youtubeTopic.value,
       youtubeKeyword.value, 
       youtubeMaxResults.value
     )
@@ -262,8 +279,12 @@ const processVideoUrl = async () => {
       ElMessage.warning('请输入视频链接')
       return
     }
+    if (!videoTopic.value) {
+      ElMessage.warning('请输入视频主题/类型描述')
+      return
+    }
 
-    const result = await videoService.processVideoUrl(videoUrl.value)
+    const result = await videoService.processVideoUrl(videoUrl.value, videoTopic.value)
     videoResult.value = result
     ElMessage.success('视频处理成功')
   } catch (error: any) {
@@ -320,6 +341,10 @@ onMounted(() => {
               clearable
               class="input-with-select"
             />
+            <el-input
+              v-model="biliTopic"
+              placeholder="请输入主题描述"
+            />
             <el-button type="primary" @click="getVideoText('bilibili')" :loading="loading">
               获取字幕
             </el-button>
@@ -366,7 +391,7 @@ onMounted(() => {
                 <el-button
                   link
                   type="primary"
-                  @click="bvid = scope.row.bvid; getVideoText('bilibili')"
+                  @click="bvid = scope.row.bvid; biliTopic = ''; getVideoText('bilibili')"
                 >
                   获取字幕
                 </el-button>
@@ -380,6 +405,12 @@ onMounted(() => {
             <el-input
               v-model="keyword"
               placeholder="请输入搜索关键词"
+              clearable
+              class="input-with-select"
+            />
+            <el-input
+              v-model="biliTopic"
+              placeholder="请输入主题描述"
               clearable
               class="input-with-select"
             />
@@ -418,6 +449,10 @@ onMounted(() => {
               placeholder="请输入YouTube视频ID或完整链接"
               clearable
               class="input-with-select"
+            />
+            <el-input
+              v-model="youtubeTopic"
+              placeholder="请输入主题描述"
             />
             <el-button type="primary" @click="getVideoText('youtube')" :loading="loading">
               获取字幕
@@ -464,7 +499,7 @@ onMounted(() => {
                 <el-button
                   link
                   type="primary"
-                  @click="youtubeId = scope.row.id; getVideoText('youtube')"
+                  @click="youtubeId = scope.row.id; youtubeTopic = ''; getVideoText('youtube')"
                 >
                   获取字幕
                 </el-button>
@@ -478,6 +513,12 @@ onMounted(() => {
             <el-input
               v-model="youtubeKeyword"
               placeholder="请输入搜索关键词"
+              clearable
+              class="input-with-select"
+            />
+            <el-input
+              v-model="youtubeTopic"
+              placeholder="请输入主题描述"
               clearable
               class="input-with-select"
             />
@@ -514,6 +555,12 @@ onMounted(() => {
             <el-input
               v-model="videoUrl"
               placeholder="请输入视频链接(支持B站和YouTube)"
+              clearable
+              class="input-with-select"
+            />
+            <el-input
+              v-model="videoTopic"
+              placeholder="请输入视频主题/类型描述"
               clearable
               class="input-with-select"
             />

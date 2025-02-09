@@ -45,14 +45,15 @@ export const biliService = {
     }
   },
 
-  async getVideoTextWithProgress(bvid: string, onProgress: (progress: Progress) => void): Promise<{ task_id: string }> {
+  async getVideoTextWithProgress(topic: string, bvid: string, onProgress: (progress: Progress) => void): Promise<{ task_id: string }> {
     try {
       // 使用POST方法并明确设置超时
       const response = await axios.post(
         `${API_BASE_URL}/video/${extractBvid(bvid)}`,
-        {}, // 空body
+        { topic }, // 确保传递topic
         {
           timeout: 3000, // 明确设置超时
+
           headers: {
             'Content-Type': 'application/json'
           }
@@ -95,12 +96,14 @@ export const biliService = {
   },
 
   async batchProcess(
+    topic: string, // 确保topic参数
     keyword: string,
     maxResults = 5
   ): Promise<{ task_id: string }> {
     try {
       const response = await axios.post(`${API_BASE_URL}/batch`, null, {
         params: { 
+          topic, // 确保传递topic
           keyword, 
           max_results: maxResults 
         }

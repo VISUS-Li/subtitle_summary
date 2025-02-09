@@ -9,7 +9,7 @@ class CozeConfig(BaseModel):
     app_id: str = Field(..., description="应用ID")
     public_key: str = Field(..., description="公钥ID")
     private_key_path: str = Field(..., description="私钥文件路径")
-    http_timeout: int = Field(default=300, description="HTTP请求超时时间(秒)")
+    http_timeout: int = Field(default=1000, description="HTTP请求超时时间(秒)")
     workflow_ids: Dict[str, str] = Field(default_factory=dict, description="工作流ID映射")
 
 class Config(BaseModel):

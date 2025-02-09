@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings
 from typing import Dict, Optional
+from ..prompts.constants import PromptTemplateType
 
 
 class Settings(BaseSettings):
@@ -43,7 +44,28 @@ class Settings(BaseSettings):
             "temperature": 0.7,
             "max_tokens": 1000
         },
+        "subtitle_summary": {
+            "default_model": "kimi",
+            "temperature": 0.7,
+            "max_tokens": 50000
+        },
         # 可以添加其他工作流配置
+    }
+
+    # API 速率限制配置
+    RATE_LIMITS: Dict = {
+        "kimi": {
+            "requests_per_second": 10,  # 每秒请求数
+            "max_bucket_size": 20,      # 最大突发请求数
+        },
+        "deepseek": {
+            "requests_per_second": 5,
+            "max_bucket_size": 10,
+        },
+        "qwen": {
+            "requests_per_second": 8,
+            "max_bucket_size": 15,
+        }
     }
 
     class Config:

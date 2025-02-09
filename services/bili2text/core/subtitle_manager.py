@@ -11,6 +11,7 @@ from db.init.base import get_db
 from db.models.subtitle import Video, Subtitle, SubtitleSource, Platform, SubtitleSummary, GeneratedScript, TaskStatus
 from services.coze.coze import CozeClient
 from services.coze.config import CozeConfig, Config
+from db.models.subtitle import get_video_url
 
 
 class SubtitleManager:
@@ -146,6 +147,7 @@ class SubtitleManager:
 
     async def save_subtitle(
         self,
+        topic: str,
         video_id: str,
         content: Union[str, Dict],  # 可以接收字符串或字典格式的内容
         timed_content,
@@ -321,12 +323,6 @@ class SubtitleManager:
                 )
                 db.add(subtitle)
                 db.flush()  # 确保获取到subtitle.id
-                
-                # 创建异步任务处理字幕总结
-                asyncio.create_task(self._process_subtitle_summary(
-                    subtitle.id,
-                    pure_text
-                ))
                 
         except Exception as e:
             print(f"保存字幕失败: {str(e)}")
@@ -569,6 +565,7 @@ class SubtitleManager:
                     video_data = {
                         'id': video.id,
                         'platform': video.platform.value,
+                        'platform_vid': video.platform_vid,
                         'title': video.title,
                         'author': video.author,
                         'search_rank': video.search_rank,
@@ -578,7 +575,7 @@ class SubtitleManager:
                             'language': subtitle.language,
                             'source': subtitle.source.value
                         } if subtitle else None,
-                        'summary': {
+                        'point_summary': {
                             'content': summary.content,
                             'create_time': summary.create_time.isoformat() if summary.create_time else None
                         } if summary else None
@@ -622,8 +619,8 @@ class SubtitleManager:
                     video_ids.append(video['id'])
                 if video.get('subtitle', {}).get('id'):
                     subtitle_ids.append(video['subtitle']['id'])
-                if video.get('summary', {}).get('id'):
-                    summary_ids.append(video['summary']['id'])
+                if video.get('point_summary', {}).get('id'):
+                    summary_ids.append(video['point_summary']['id'])
             
             with self._db_transaction() as db:
                 script = GeneratedScript(
@@ -756,153 +753,94 @@ class SubtitleManager:
             print(f"获取脚本列表失败: {str(e)}")
             raise 
 
-    async def _process_subtitle_summary(self, subtitle_id: int, content: str) -> None:
-        """异步处理字幕总结"""
+    async def _process_subtitle_summary(self, topic: str, subtitle_id: int, content: str) -> None:
+        """异步处理字幕总结（新流程）"""
         try:
-            # 检查是否已存在总结
-            summary = self.get_subtitle_summary(subtitle_id)
-            if summary:
-                print(f"字幕总结已存在: subtitle_id={subtitle_id}")
-                return
+            # 在同一个数据库会话中获取所有需要的信息
+            with self._db_transaction() as db:
+                # 检查是否已存在总结
+                existing_summary = db.query(SubtitleSummary).filter(
+                    SubtitleSummary.subtitle_id == subtitle_id
+                ).first()
+                
+                if existing_summary and existing_summary.content:
+                    return
 
-            # 异步调用总结工作流
-            summary_result = await self.coze_client.run_summary_workflow(
-                topic=content,
+                # 获取字幕信息
+                subtitle = db.query(Subtitle).filter(
+                    Subtitle.id == subtitle_id
+                ).first()
+                
+                if not subtitle:
+                    print(f"未找到字幕记录: {subtitle_id}")
+                    return
+                
+                # 获取关联视频信息
+                video = db.query(Video).filter(
+                    Video.id == subtitle.video_id
+                ).first()
+                
+                if not video:
+                    print(f"未找到关联视频: {subtitle.video_id}")
+                    return
+
+                # 保存需要的信息，避免在会话外使用
+                subtitle_language = subtitle.language
+                video_title = video.title
+                video_source_type = video.source_type
+
+            # 在数据库会话外调用外部API
+            keypoints_result = await self.coze_client.run_keypoints_workflow(
+                topic=topic,
                 subtitle=content,
-                language='zh',
-                title='',
-                source=''
+                language=subtitle_language,
+                title=video_title,
+                source=video_source_type
             )
             
-            if summary_result:
-                # 保存总结结果
-                self.save_subtitle_summary(subtitle_id, summary_result['summarized_subtitle'])
-                print(f"字幕总结处理完成: subtitle_id={subtitle_id}")
-            else:
-                print(f"生成字幕总结失败: subtitle_id={subtitle_id}")
-                
-        except Exception as e:
-            print(f"处理字幕总结失败: {str(e)}")
-            # 这里我们只记录错误但不抛出异常，保证主流程不受影响 
+            if not keypoints_result or not keypoints_result.get('key_points'):
+                print("关键点提取失败")
+                return
 
-    async def generate_subtitle_summary(self, subtitle_id: int) -> Optional[Dict]:
-        """生成字幕总结
-        
-        Args:
-            subtitle_id: 字幕ID
-            
-        Returns:
-            Optional[Dict]: 总结结果
-        """
-        try:
-            print(f"开始生成字幕总结: subtitle_id={subtitle_id}")
-            
-            # 获取所需数据
-            video_data = None
-            subtitle_content = None
-            summary_obj = None
-            
+            # 直接拼接关键点内容
+            full_summary = "\n\n".join([
+                f"【{kp['point']}】\n{kp['content']}"
+                for kp in keypoints_result['key_points']
+                if kp.get('point') and kp.get('content')
+            ])
+
+            # 在新的数据库会话中保存结果
             with self._db_transaction() as db:
-                # 检查字幕是否存在并获取相关数据
-                subtitle = db.query(Subtitle).get(subtitle_id)
-                if not subtitle:
-                    print(f"未找到字幕: subtitle_id={subtitle_id}")
-                    return None
-                    
-                video = db.query(Video).get(subtitle.video_id)
-                if not video:
-                    print(f"未找到视频: video_id={subtitle.video_id}")
-                    return None
-                
-                # 在会话内获取所需数据
-                video_data = {
-                    'search_keyword': video.search_keyword,
-                    'title': video.title,
-                    'platform': video.platform,
-                    'platform_vid': video.platform_vid
-                }
-                subtitle_content = subtitle.content
-                
-                # 检查是否已存在总结
                 summary = db.query(SubtitleSummary).filter(
                     SubtitleSummary.subtitle_id == subtitle_id
                 ).first()
                 
-                if summary:
-                    if summary.status == TaskStatus.COMPLETED:
-                        print(f"字幕总结已存在: subtitle_id={subtitle_id}")
-                        return {
-                            'content': summary.content,
-                            'status': summary.status.value
-                        }
-                    elif summary.status == TaskStatus.FAILED and summary.retry_count >= 3:
-                        print(f"字幕总结已达到最大重试次数: subtitle_id={subtitle_id}")
-                        return None
-                else:
-                    # 创建新的总结记录
+                if not summary:
                     summary = SubtitleSummary(
                         subtitle_id=subtitle_id,
-                        status=TaskStatus.PROCESSING,
-                        retry_count=1,
-                        last_retry_time=datetime.utcnow()
+                        content=full_summary,
+                        key_points=keypoints_result['key_points'],
+                        association=keypoints_result['association'],
+                        score=keypoints_result['score'],
+                        status=TaskStatus.COMPLETED
                     )
                     db.add(summary)
-                    db.flush()
-                
-                # 更新现有总结记录的状态
-                if summary.retry_count:
-                    summary.status = TaskStatus.PROCESSING
-                    summary.retry_count += 1
-                    summary.last_retry_time = datetime.utcnow()
-                
-                summary_obj = summary
-            
-            try:
-                print(f"调用 Coze API 生成总结: subtitle_id={subtitle_id}")
-                # 调用总结工作流
-                summary_result = await self.coze_client.run_summary_workflow(
-                    topic=video_data['search_keyword'] or '',
-                    subtitle=subtitle_content,
-                    language='zh',
-                    title=video_data['title'] or '',
-                    source=f"{video_data['platform'].value}:{video_data['platform_vid']}"
-                )
-                
-                if not summary_result:
-                    raise Exception("工作流返回结果为空")
-                
-                # 更新总结内容
-                with self._db_transaction() as db:
-                    summary = db.query(SubtitleSummary).get(summary_obj.id)
-                    if summary:
-                        summary.content = summary_result['summarized_subtitle']
-                        summary.status = TaskStatus.COMPLETED
-                        summary.error_message = None
-                        print(f"字幕总结已完成: subtitle_id={subtitle_id}")
-                        return summary_result
-                        
-            except Exception as e:
-                error_msg = f"生成总结失败: {str(e)}"
-                print(error_msg)
-                
-                # 更新失败状态
-                with self._db_transaction() as db:
-                    summary = db.query(SubtitleSummary).get(summary_obj.id)
-                    if summary:
-                        summary.status = TaskStatus.FAILED
-                        summary.error_message = error_msg
-            
-            return None
-            
+                else:
+                    summary.content = full_summary
+                    summary.key_points = keypoints_result['key_points']
+                    summary.association = keypoints_result['association']
+                    summary.score = keypoints_result['score']
+                    summary.status = TaskStatus.COMPLETED
+
         except Exception as e:
-            print(f"字幕总结处理异常: {str(e)}")
-            return None
-            
-    async def generate_topic_script(self, topic: str, platform: Platform) -> Optional[str]:
+            print(f"处理字幕总结失败: {str(e)}")
+
+    async def generate_topic_script(self, topic: str, keyword: str, platform: Platform) -> Optional[str]:
         """为指定主题生成脚本
         
         Args:
             topic: 主题
+            keyword
             platform: 平台
             
         Returns:
@@ -912,7 +850,7 @@ class SubtitleManager:
             # 获取相关视频的字幕和总结
             videos_data = self.get_videos_with_subtitles_and_summaries(
                 platform=platform,
-                search_keyword=topic
+                search_keyword=keyword
             )
             
             if not videos_data:
@@ -922,20 +860,25 @@ class SubtitleManager:
             # 构建工作流输入
             subtitles = []
             for video in videos_data:
-                if video.get('subtitle') and video.get('summary'):
+                if video.get('subtitle') and video.get('point_summary'):
+                    # 检查point_summary的content是否为空
+                    point_summary_content = video['point_summary'].get('content', '')
+                    if not point_summary_content:
+                        continue
+                        
                     subtitle_item = {
-                        'subtitle': video['summary'].get('content', ''),
-                        'title': video.get('title', ''),
-                        'language': video['subtitle'].get('language', 'zh')
+                        "subtitle": point_summary_content,
+                        "title": video.get('title', ''),
+                        "video_url": get_video_url(video.get('platform_vid'), platform),
+                        "language": video['subtitle'].get('language', 'zh')
                     }
                     subtitles.append(subtitle_item)
-            
             if not subtitles:
                 print("没有找到可用的字幕总结")
                 return None
                 
             # 调用脚本生成工作流
-            script = await self.coze_client.run_script_workflow(
+            script = self.coze_client.run_script_workflow(
                 topic=topic,
                 subtitles=subtitles
             )

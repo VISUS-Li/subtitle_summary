@@ -20,11 +20,11 @@ export const youtubeService = {
     throw new Error('无效的 YouTube 视频 URL 或 ID')
   },
 
-  async getVideoTextWithProgress(videoId: string, onProgress: (progress: Progress) => void): Promise<{ task_id: string }> {
+  async getVideoTextWithProgress(topic: string, videoId: string, onProgress: (progress: Progress) => void): Promise<{ task_id: string }> {
     try {
       const response = await axios.post(
         `${API_BASE_URL}/video/${this.extractVideoId(videoId)}`,
-        {},
+        { topic },
         {
           timeout: 3000,
           headers: {
@@ -67,11 +67,13 @@ export const youtubeService = {
   },
 
   async batchProcess(
+    topic: string,
     keyword: string,
     maxResults = 5
   ): Promise<{ task_id: string }> {
     const response = await axios.post(`${API_BASE_URL}/batch`, null, {
       params: {
+        topic,
         keyword,
         max_results: maxResults
       }

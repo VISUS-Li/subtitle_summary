@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Column, String, Text, DateTime, Boolean, Integer, Enum, JSON, ForeignKey
+from sqlalchemy import Column, String, Text, DateTime, Boolean, Integer, Enum, JSON, ForeignKey, Float
 from sqlalchemy.orm import relationship
 from db.init.base import Base
 import enum
@@ -87,6 +87,12 @@ class SubtitleSummary(Base):
     workflow_id = Column(String(64), nullable=True)  # Coze工作流ID
     last_retry_time = Column(DateTime, nullable=True)  # 上次重试时间
 
+    # 新增关键点相关字段
+    key_points = Column(JSON, nullable=True)  # 关键点列表
+    association = Column(Boolean, nullable=True)  # 关联性判断
+    score = Column(Float, nullable=True)  # 关联分数
+    point_details = Column(Text(length=4294967295), nullable=True)  # 详细要点总结
+
 
 class Subtitle(Base):
     """字幕信息表"""
@@ -133,3 +139,21 @@ class GeneratedScript(Base):
     
     def __repr__(self):
         return f"<GeneratedScript(id={self.id}, topic='{self.topic}', platform={self.platform})>"
+
+
+def get_video_url(platform_vid: str, platform: Platform) -> str:
+    """根据平台和视频ID生成视频URL
+    
+    Args:
+        platform_vid: 平台视频ID
+        platform: 平台类型
+        
+    Returns:
+        str: 视频URL
+    """
+    if platform == Platform.YOUTUBE:
+        return f"https://www.youtube.com/watch?v={platform_vid}"
+    elif platform == Platform.BILIBILI:
+        return f"https://www.bilibili.com/video/{platform_vid}"
+    else:
+        raise ValueError(f"不支持的平台: {platform}")

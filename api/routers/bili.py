@@ -36,7 +36,7 @@ async def search_videos(keyword: str, page: int = 1, page_size: int = 20):
 
 
 @router.post("/video/{bvid}")
-async def get_video_text(bvid: str, background_tasks: BackgroundTasks):
+async def get_video_text(topic: str, bvid: str, background_tasks: BackgroundTasks):
     """获取视频字幕"""
     if not video_processor:
         raise HTTPException(status_code=400, detail="服务未初始化")
@@ -47,6 +47,7 @@ async def get_video_text(bvid: str, background_tasks: BackgroundTasks):
         # 创建异步任务
         background_tasks.add_task(
             video_processor.process_single_video,
+            topic,
             bvid,
             Platform.BILIBILI
         )
@@ -57,7 +58,7 @@ async def get_video_text(bvid: str, background_tasks: BackgroundTasks):
 
 
 @router.post("/batch")
-async def batch_process(keyword: str, max_results: int, background_tasks: BackgroundTasks):
+async def batch_process(topic: str, keyword: str, max_results: int, background_tasks: BackgroundTasks):
     """批量处理视频"""
     if not video_processor:
         raise HTTPException(status_code=400, detail="服务未初始化")
@@ -68,10 +69,10 @@ async def batch_process(keyword: str, max_results: int, background_tasks: Backgr
         # 创建批量处理任务
         background_tasks.add_task(
             video_processor.process_batch_videos,
+            topic,
             keyword,
             Platform.BILIBILI,
             max_results,
-            task_id
         )
 
         return {"task_id": task_id}

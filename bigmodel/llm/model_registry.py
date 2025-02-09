@@ -8,6 +8,7 @@ class ModelRegistry:
     def register(cls, model_id: str):
         def decorator(model_class: Type[OpenAICompatibleLLM]):
             cls._models[model_id] = model_class
+            print("注册大模型：", model_id)
             return model_class
         return decorator
 

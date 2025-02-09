@@ -3,7 +3,9 @@ coze:
   app_id: "1182425168827"
   public_key: "pCdS-X6Rg5wlrjEZ6lQ30RcUYhg6zJDJjjS74YF_mZE"
   private_key_path: "./pem/private_key.pem"
-  http_timeout: 300
+  http_timeout: 1000
   workflow_ids:
     WORKFLOW_SUMMARY: "7467074695335067675"
     WORKFLOW_SCRIPT: "7467097121859452937"
+    WORKFLOW_KEYPOINTS: "7468956808805072931"
+    WORKFLOW_POINT_DETAIL: "7468959087846342707"

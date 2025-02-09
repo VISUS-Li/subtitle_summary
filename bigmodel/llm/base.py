@@ -5,6 +5,9 @@ from langchain_core.messages import BaseMessage, AIMessage
 from langchain_core.outputs import ChatResult, ChatGeneration
 from openai import AsyncOpenAI, OpenAI
 from pydantic import Field, PrivateAttr
+from langchain_core.rate_limiters import InMemoryRateLimiter
+from bigmodel.core.config import settings
+import httpx
 
 
 class BaseLLMProvider(BaseChatModel, ABC):
@@ -43,16 +46,29 @@ class OpenAICompatibleLLM(BaseChatModel):
     _sync_client: OpenAI = PrivateAttr()
     _async_client: AsyncOpenAI = PrivateAttr()
     
+    timeout: int = 600  # 默认600秒超时
+    
     def __init__(self, **kwargs: Any):
         super().__init__(**kwargs)
         # 初始化API客户端
         self._sync_client = OpenAI(
             api_key=self.api_key,
-            base_url=self.base_url
+            base_url=self.base_url,
+            timeout=httpx.Timeout(self.timeout)  # 设置连接和读取超时
         )
+
         self._async_client = AsyncOpenAI(
             api_key=self.api_key,
-            base_url=self.base_url
+            base_url=self.base_url,
+            timeout=httpx.Timeout(self.timeout)  # 设置连接和读取超时
+        )
+        
+        # 初始化速率限制器
+        model_limits = settings.RATE_LIMITS.get(self._llm_type, {})
+        self._rate_limiter = InMemoryRateLimiter(
+            requests_per_second=model_limits.get("requests_per_second", 1),
+            max_bucket_size=model_limits.get("max_bucket_size", 1),
+            check_every_n_seconds=0.1  # 每 100ms 检查一次
         )
 
     def _format_messages(self, messages: List[BaseMessage]) -> List[Dict[str, str]]:
@@ -101,6 +117,9 @@ class OpenAICompatibleLLM(BaseChatModel):
     ) -> ChatResult:
         """异步生成回复"""
         try:
+            # 等待获取令牌
+            await self._rate_limiter.aacquire()
+            
             response = await self._async_client.chat.completions.create(
                 model=self.model_name,
                 messages=self._format_messages(messages),

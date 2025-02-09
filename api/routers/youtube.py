@@ -46,11 +46,12 @@ async def search_videos(keyword: str, page: int = 1, page_size: int = 20):
 
 
 @router.post("/video/{video_id}")
-async def get_video_text(video_id: str, background_tasks: BackgroundTasks):
+async def get_video_text(topic: str, video_id: str, background_tasks: BackgroundTasks):
     """获取视频文本"""
     if not video_processor:
         raise HTTPException(status_code=400, detail="服务未初始化")
     return await video_processor.process_single_video(
+        topic,
         video_id,
         Platform.YOUTUBE
     )
@@ -66,13 +67,13 @@ async def websocket_endpoint(websocket: WebSocket, task_id: str):
 
 
 @router.post("/batch")
-async def batch_process(keyword: str, max_results: int, background_tasks: BackgroundTasks):
+async def batch_process(topic: str, keyword: str, max_results: int, background_tasks: BackgroundTasks):
     """批量处理视频"""
     if not video_processor:
         raise HTTPException(status_code=400, detail="服务未初始化")
     return await video_processor.process_batch_videos(
+        topic,
         keyword,
         Platform.YOUTUBE,
-        max_results,
-        background_tasks
+        max_results
     )

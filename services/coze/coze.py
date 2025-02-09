@@ -5,6 +5,8 @@ import jwt
 import requests
 from pathlib import Path
 from .config import CozeConfig
+import asyncio
+
 
 class CozeClient:
     def __init__(self, config: CozeConfig):
@@ -14,11 +16,11 @@ class CozeClient:
         self.public_key = config.public_key
         self.private_key_path = config.private_key_path
         self.http_timeout = config.http_timeout
-        
+
         self.access_token = None
         self.expiry = 0
         self._load_private_key()
-        
+
     def _load_private_key(self):
         """加载RSA私钥"""
         try:
@@ -26,12 +28,12 @@ class CozeClient:
                 self.private_key = f.read()
         except Exception as e:
             raise Exception(f"读取私钥文件失败: {str(e)}")
-            
+
     def _authenticate(self):
         """获取访问令牌"""
         if self.access_token and time.time() < self.expiry - 60:
             return
-            
+
         # 生成JWT
         now = int(time.time())
         claims = {
@@ -41,12 +43,12 @@ class CozeClient:
             'iat': now,
             'jti': str(int(time.time() * 1000))
         }
-        
+
         headers = {
             'kid': self.public_key,
             'typ': 'JWT'
         }
-        
+
         try:
             token = jwt.encode(
                 claims,
@@ -56,7 +58,7 @@ class CozeClient:
             )
         except Exception as e:
             raise Exception(f"生成JWT失败: {str(e)}")
-            
+
         # 请求访问令牌
         url = f"{self.base_url}/api/permission/oauth2/token"
         headers = {
@@ -67,48 +69,48 @@ class CozeClient:
             'duration_seconds': 86399,
             'grant_type': 'urn:ietf:params:oauth:grant-type:jwt-bearer'
         }
-        
+
         try:
             response = requests.post(url, json=payload, headers=headers, timeout=self.http_timeout)
             response.raise_for_status()
             result = response.json()
-            
+
             self.access_token = result['access_token']
             self.expiry = time.time() + result['expires_in']
         except Exception as e:
             raise Exception(f"获取访问令牌失败: {str(e)}")
-            
+
     def workflow_run(self, workflow_id: str, parameters: Dict = None, bot_id: str = None, ext: Dict = None) -> Dict:
         """
         执行工作流(非流式)
         """
         self._authenticate()
-        
+
         url = f"{self.base_url}/v1/workflow/run"
         headers = {
             'Authorization': f'Bearer {self.access_token}',
             'Content-Type': 'application/json'
         }
-        
+
         payload = {
             'workflow_id': workflow_id
         }
-        
+
         if parameters:
             payload['parameters'] = parameters
         if bot_id:
             payload['bot_id'] = bot_id
         if ext:
             payload['ext'] = ext
-            
+        print("coze workflow param: ", parameters)
         try:
             response = requests.post(url, json=payload, headers=headers, timeout=self.http_timeout)
             response.raise_for_status()
             result = response.json()
-            
+
             if result['code'] != 0:
                 raise Exception(f"工作流运行失败: {result['msg']}")
-                
+
             # 构造返回事件
             return {
                 'id': 1,  # 非流式只有一个消息
@@ -123,14 +125,14 @@ class CozeClient:
             }
         except Exception as e:
             raise Exception(f"执行工作流失败: {str(e)}")
-    
+
     def run_summary_workflow(
-        self, 
-        topic: str,
-        subtitle: str,
-        language: str = 'zh',
-        title: str = '',
-        source: str = ''
+            self,
+            topic: str,
+            subtitle: str,
+            language: str = 'zh',
+            title: str = '',
+            source: str = ''
     ) -> Dict:
         """
         执行字幕总结工作流
@@ -152,7 +154,7 @@ class CozeClient:
         workflow_id = self.config.workflow_ids.get('WORKFLOW_SUMMARY')
         if not workflow_id:
             raise ValueError("未配置WORKFLOW_SUMMARY工作流ID")
-            
+
         parameters = {
             "topic": topic,
             "subtitle": subtitle,
@@ -160,9 +162,9 @@ class CozeClient:
             "title": title,
             "source": source
         }
-        
+
         result = self.workflow_run(workflow_id, parameters=parameters)
-        
+
         try:
             content = result['data']['content']
             if isinstance(content, str):
@@ -170,11 +172,11 @@ class CozeClient:
             return content
         except Exception as e:
             raise Exception(f"解析总结工作流返回数据失败: {str(e)}")
-    
+
     def run_script_workflow(
-        self, 
-        topic: str,
-        subtitles: List[Dict[str, str]]
+            self,
+            topic: str,
+            subtitles: List[Dict[str, str]]
     ) -> str:
         """
         执行脚本生成工作流
@@ -184,6 +186,7 @@ class CozeClient:
             subtitles: 字幕列表，每个字幕包含：
                 - subtitle: 字幕内容
                 - title: 标题
+                - video_url: 视频连接
                 - language: 语言
             
         Returns:
@@ -192,16 +195,90 @@ class CozeClient:
         workflow_id = self.config.workflow_ids.get('WORKFLOW_SCRIPT')
         if not workflow_id:
             raise ValueError("未配置WORKFLOW_SCRIPT工作流ID")
-        
+
         # 验证字幕列表的格式
         for item in subtitles:
             if not all(key in item for key in ['subtitle', 'title', 'language']):
                 raise ValueError("字幕列表格式错误，每个字幕必须包含 subtitle、title 和 language 字段")
-            
+
         parameters = {
             "topic": topic,
             "subtitles": subtitles
         }
-        
+
         result = self.workflow_run(workflow_id, parameters=parameters)
         return result['data']['content']
+
+    async def run_keypoints_workflow(
+            self,
+            topic: str,
+            subtitle: str,
+            language: str = 'zh',
+            title: str = '',
+            source: str = ''
+    ) -> Dict:
+        """异步执行关键点提取工作流"""
+        workflow_id = self.config.workflow_ids.get('WORKFLOW_KEYPOINTS')
+        if not workflow_id:
+            raise ValueError("未配置WORKFLOW_KEYPOINTS工作流ID")
+
+        parameters = {
+            "topic": topic,
+            "subtitle": subtitle,
+            "language": language,
+            "title": title,
+            "source": source
+        }
+
+        # 使用asyncio.to_thread包装同步调用
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None,
+            lambda: self.workflow_run(workflow_id, parameters=parameters)
+        )
+
+        try:
+            content = result['data']['content']
+            if isinstance(content, str):
+                content = json.loads(content)
+            return content
+        except Exception as e:
+            raise Exception(f"解析关键点工作流返回数据失败: {str(e)}")
+
+    async def run_point_detail_workflow(
+            self,
+            point: str,
+            topic: str,
+            subtitle: str,
+            language: str = 'zh',
+            title: str = '',
+            source: str = ''
+    ) -> Dict:
+        """异步执行要点详情工作流"""
+        workflow_id = self.config.workflow_ids.get('WORKFLOW_POINT_DETAIL')
+        if not workflow_id:
+            raise ValueError("未配置WORKFLOW_POINT_DETAIL工作流ID")
+
+        parameters = {
+            "point": point,
+            "topic": topic,
+            "subtitle": subtitle,
+            "language": language,
+            "title": title,
+            "source": source
+        }
+
+        # 使用asyncio.to_thread包装同步调用
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None,
+            lambda: self.workflow_run(workflow_id, parameters=parameters)
+        )
+
+        try:
+            content = result['data']['content']
+            if isinstance(content, str):
+                content = json.loads(content)
+            return content
+        except Exception as e:
+            raise Exception(f"解析要点详情工作流返回数据失败: {str(e)}")

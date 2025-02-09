@@ -58,7 +58,7 @@ class AudioTranscriber:
             print(f"模型所在设备: {next(self._model.parameters()).device}")
 
     @retry_on_failure(max_retries=3, delay=5)
-    async def transcribe_file(self, audio_path: str, video_id: str, platform: Platform) -> Optional[str]:
+    async def transcribe_file(self, topic: str, audio_path: str, video_id: str, platform: Platform) -> Optional[str]:
         """转录单个音频文件
         
         Args:
@@ -110,6 +110,7 @@ class AudioTranscriber:
             # 保存字幕
             try:
                 await self._subtitle_manager.save_subtitle(
+                    topic=topic,
                     video_id=video_id,
                     content=result["text"],
                     timed_content=webvtt_result,
@@ -131,47 +132,6 @@ class AudioTranscriber:
             error_msg = f"转录失败: {str(e)}"
             print(error_msg, file=sys.stderr)
             raise
-
-    async def transcribe_files(
-            self,
-            audio_paths: List[str],
-            video_ids: List[str],
-            platform: Platform,
-            task_id: str = None
-    ) -> List[str]:
-        """转录多个音频文件
-        
-        Args:
-            audio_paths: 音频文件路径列表
-            video_ids: 视频ID列表
-            platform: 平台
-            task_id: 任务ID(可选)
-            
-        Returns:
-            List[str]: 转录文本列表
-        """
-        output_files = []
-        total = len(audio_paths)
-
-        for i, (audio_path, video_id) in enumerate(zip(audio_paths, video_ids), 1):
-            try:
-                # 获取视频信息以显示标题
-                video_info = self._subtitle_manager.get_video_info(platform, video_id)
-                video_title = f"「{video_info['title']}」" if video_info and video_info.get('title') else ''
-                print(f"处理第 {i}/{total} 个文件 [{platform.value}] {video_id} {video_title}")
-                output_text = await self.transcribe_file(
-                    audio_path,
-                    video_id,
-                    platform
-                )
-                if output_text:
-                    output_files.append(output_text)
-                print(f"进度: {i}/{total}")
-            except Exception as e:
-                print(f"转录文件失败 {audio_path}: {str(e)}")
-                continue
-
-        return output_files
 
     def convert_to_webvtt(self, result):
         """

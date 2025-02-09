@@ -6,11 +6,12 @@ const API_BASE_URL = `${API_CONFIG.VIDEO}`
 
 
 export const videoService = {
-  async processVideoUrl(url: string): Promise<VideoResult> {
+  async processVideoUrl(url: string, topic: string): Promise<VideoResult> {
     try {
       const response = await axios.post(`${API_BASE_URL}/process`, {
         url: url,
-        language: 'zh'
+        language: 'zh',
+        topic: topic
       })
       return response.data
     } catch (error: any) {
