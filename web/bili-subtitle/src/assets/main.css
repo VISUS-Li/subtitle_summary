@@ -1,27 +1,13 @@
-@import './base.css';
-
-#app {
+/* 删除或注释掉以下限制宽度的样式 */
+/* #app {
   max-width: 1280px;
   margin: 0 auto;
   padding: 2rem;
   font-weight: normal;
-}
+} */
 
-a,
-.green {
-  text-decoration: none;
-  color: hsla(160, 100%, 37%, 1);
-  transition: 0.4s;
-  padding: 3px;
-}
-
-@media (hover: hover) {
-  a:hover {
-    background-color: hsla(160, 100%, 37%, 0.2);
-  }
-}
-
-@media (min-width: 1024px) {
+/* 删除或注释掉以下媒体查询样式 */
+/* @media (min-width: 1024px) {
   body {
     display: flex;
     place-items: center;
@@ -32,4 +18,10 @@ a,
     grid-template-columns: 1fr 1fr;
     padding: 0 2rem;
   }
+} */
+
+/* 添加新的样式 */
+#app {
+  width: 100%;
+  min-height: 100vh;
 }

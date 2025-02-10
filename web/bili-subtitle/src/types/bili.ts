@@ -38,3 +38,18 @@ export interface Progress {
   result?: any
   error?: string
 }
+
+// 添加平台选择枚举
+export enum PlatformChoice {
+  BILIBILI = 'bilibili',
+  YOUTUBE = 'youtube',
+  ALL = 'all'
+}
+
+// 添加批量处理请求接口
+export interface BatchProcessRequest {
+  topic: string
+  keyword: string
+  max_results: number
+  platform_choice: PlatformChoice
+}
