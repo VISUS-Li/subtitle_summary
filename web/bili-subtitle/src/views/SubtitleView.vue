@@ -30,15 +30,13 @@ const handleBatchProcess = async () => {
       platform_choice: selectedPlatform.value
     }
 
-    await videoService.batchProcessVideos(request, (progress) => {
-      processLogs.value.push(progress)
-      
-      if (progress.status === 'completed') {
-        ElMessage.success('批量处理完成')
-      } else if (progress.status === 'failed') {
-        ElMessage.error(progress.message || '处理失败')
-      }
-    })
+    const { task_id } = await videoService.batchProcess(
+      selectedPlatform.value === PlatformChoice.BILIBILI ? 'bilibili' : 'youtube',
+      request
+    )
+    
+    // 可以根据需要处理返回的 task_id
+    ElMessage.success('批量处理任务已提交')
   } catch (error: any) {
     ElMessage.error(error.message || '批量处理失败')
   } finally {
@@ -53,7 +51,7 @@ const handleBatchProcess = async () => {
       <h2 class="page-title">批量字幕总结</h2>
       
       <el-card class="process-card">
-        <el-form :model="form" label-position="top">
+        <el-form label-position="top">
           <el-form-item label="主题描述">
             <el-input
               v-model="topic"

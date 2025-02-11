@@ -16,4 +16,4 @@ click==8.1.7  # For command line tools
 
 # Using dev version to get the latest updates for correct subtitle support
 # Note: some packages might not be compatible with Windows
-#git+https://github.com/Nemo2011/bilibili-api.git@dev
+git+https://github.com/Nemo2011/bilibili-api.git@dev

@@ -3,8 +3,6 @@ import time
 import hashlib
 from urllib.parse import urlencode
 from typing import List, Dict, Optional
-from db.service_config import ServiceConfig
-from services.bili2text.config import MAX_RETRIES, RETRY_DELAY
 from services.bili2text.core.utils import retry_on_failure
 from langchain_community.document_loaders import BiliBiliLoader
 import sys
@@ -13,6 +11,7 @@ import random
 import json
 import asyncio
 from bilibili_api import search
+from services.config_service import ConfigurationService
 
 
 class BilibiliAPI:
@@ -26,11 +25,11 @@ class BilibiliAPI:
             'Referer': 'https://www.bilibili.com'
         }
 
-        db = ServiceConfig()
+        config_service = ConfigurationService()
         cookies = {
-            'sessdata': db.get_service_config("bilibili", "sessdata"),
-            'bili_jct': db.get_service_config("bilibili", "bili_jct"),
-            'buvid3': db.get_service_config("bilibili", "buvid3")
+            'sessdata': config_service.get_config("bilibili_download", "sessdata"),
+            'bili_jct': config_service.get_config("bilibili_download", "bili_jct"),
+            'buvid3': config_service.get_config("bilibili_download", "buvid3")
         }
 
         if not all(cookies.values()):
@@ -91,8 +90,10 @@ class BilibiliAPI:
             videos = []
             remaining = max_results
             page = 1
+            retry_count = 0
+            max_retries = 3
 
-            while remaining > 0:
+            while remaining > 0 and retry_count < max_retries:
                 current_batch = min(batch_size, remaining)
                 
                 print(f"获取第{page}页视频，批次大小: {current_batch}")
@@ -101,42 +102,53 @@ class BilibiliAPI:
                 params = {
                     'keyword': keyword,
                     'page': page,
-                    'order': 'totalrank'
+                    'order': 'totalrank',
+                    'search_type': 'video',  # 明确指定搜索类型
+                    'tids': 0,  # 所有分区
+                    'duration': 0  # 所有时长
+                }
+                
+                # 更新请求头，模拟正常浏览器行为
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+                    'Referer': 'https://search.bilibili.com',
+                    'Accept': 'application/json, text/plain, */*',
+                    'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+                    'Accept-Encoding': 'gzip, deflate, br',
+                    'Connection': 'keep-alive',
+                    'Cookie': f'SESSDATA={self.sessdata}; bili_jct={self.bili_jct}; buvid3={self.buvid3}'
                 }
                 
                 # 添加WBI签名
                 params = self._sign_params(params)
                 
-                # 发送请求并增加错误处理
                 try:
+                    # 添加较长的初始延迟
+                    initial_delay = random.uniform(10, 15)
+                    print(f"初始等待 {initial_delay:.1f} 秒...")
+                    time.sleep(initial_delay)
+                    
                     response = self.session.get(
                         self.search_url,
                         params=params,
-                        headers=self.headers,
-                        timeout=10  # 添加超时设置
+                        headers=headers,
+                        timeout=15,
+                        proxies=None  # 如果有代理可以在这里配置
                     )
                     
-                    # 检查响应状态码
+                    if response.status_code == 412:
+                        print("触发反爬虫机制，等待更长时间...")
+                        retry_count += 1
+                        wait_time = random.uniform(30, 60)  # 较长的等待时间
+                        print(f"等待 {wait_time:.1f} 秒后重试...")
+                        time.sleep(wait_time)
+                        continue
+                    
                     response.raise_for_status()
                     
-                    # 检查响应内容是否为空
-                    if not response.text.strip():
-                        print("收到空响应")
-                        # 添加重试延迟
-                        time.sleep(random.uniform(3, 5))
-                        continue
+                    data = response.json()
                     
-                    # 尝试解析JSON
-                    try:
-                        data = response.json()
-                    except json.JSONDecodeError as je:
-                        print(f"JSON解析失败: {str(je)}")
-                        print(f"响应内容: {response.text[:200]}...")  # 打印部分响应内容以便调试
-                        # 添加重试延迟
-                        time.sleep(random.uniform(3, 5))
-                        continue
-
-                    if 'data' in data and 'result' in data['data']:
+                    if data.get('code') == 0 and 'data' in data and 'result' in data['data']:
                         batch_videos = []
                         for result_group in data['data']['result']:
                             if result_group['result_type'] == 'video':
@@ -151,43 +163,45 @@ class BilibiliAPI:
                                             'description': video.get('description', '')
                                         }
                                         batch_videos.append(video_info)
-
-                        videos.extend(batch_videos)
-                        print(f"本批次成功获取 {len(batch_videos)} 个视频")
-
-                        # 如果本批次获取的视频数量少于预期，说明没有更多结果
-                        if len(batch_videos) < batch_size:
-                            print("没有更多视频结果")
+                        
+                        if batch_videos:
+                            videos.extend(batch_videos)
+                            print(f"本批次成功获取 {len(batch_videos)} 个视频")
+                            remaining -= len(batch_videos)
+                            page += 1
+                            retry_count = 0  # 重置重试计数
+                            
+                            # 批次间的随机延迟
+                            if remaining > 0:
+                                delay = random.uniform(15, 25)  # 增加延迟时间
+                                print(f"等待 {delay:.1f} 秒后继续下一批次")
+                                time.sleep(delay)
+                        else:
+                            print("本页没有找到视频，搜索结束")
                             break
-
-                        remaining -= len(batch_videos)
-                        page += 1
-
-                        # 批次之间添加随机延迟
-                        if remaining > 0:
-                            delay = random.uniform(5, 15)  # 5-15秒随机延迟
-                            print(f"等待 {delay:.1f} 秒后继续下一批次")
-                            time.sleep(delay)
                     else:
-                        print(f"响应格式异常: {data}")
-                        if data.get('code') == -412:  # 请求被拦截
-                            print("请求被拦截，等待更长时间...")
-                            time.sleep(random.uniform(20, 30))
-                        continue
-
+                        print(f"接口返回异常: {data}")
+                        retry_count += 1
+                        time.sleep(random.uniform(20, 30))
+                        
                 except requests.RequestException as e:
                     print(f"请求失败: {str(e)}")
-                    # 添加重试延迟
-                    time.sleep(random.uniform(5, 10))
+                    retry_count += 1
+                    wait_time = random.uniform(20, 30)
+                    print(f"等待 {wait_time:.1f} 秒后重试...")
+                    time.sleep(wait_time)
                     continue
-
+                
+            if retry_count >= max_retries:
+                print("达到最大重试次数，搜索终止")
+                
             print(f"搜索完成，共找到 {len(videos)} 个视频")
             return videos
 
         except Exception as e:
             error_msg = f"B站搜索失败: {str(e)}"
             print(error_msg, file=sys.stderr)
-            raise
+            return []
 
     async def search_videos(self, keyword: str, max_results: int = 200) -> List[Dict]:
         """使用 bilibili-api 搜索B站视频
@@ -264,9 +278,11 @@ class BilibiliAPI:
         except Exception as e:
             error_msg = f"B站搜索失败: {str(e)}"
             print(error_msg, file=sys.stderr)
+            print("出错后切换到备选搜索方法...")
+            return self.search_videos_old(keyword, max_results)
+
             raise
 
-    @retry_on_failure(max_retries=MAX_RETRIES, delay=RETRY_DELAY)
     def get_subtitle(self, bvid: str) -> Optional[str]:
         """获取视频字幕"""
         print(f"尝试获取视频字幕: {bvid}")
@@ -311,7 +327,6 @@ class BilibiliAPI:
             print(error_msg, file=sys.stderr)
             return None
 
-    @retry_on_failure(max_retries=MAX_RETRIES, delay=RETRY_DELAY)
     def get_video_info(self, bvid: str) -> Dict:
         """获取视频详细信息"""
         try:
@@ -376,28 +391,21 @@ class BilibiliAPI:
         try:
             print(f"开始下载B站音频: {url}")
             
+            # 从配置服务获取下载选项
+            config_service = ConfigurationService()
+            base_opts = config_service.get_config("bilibili_download", "base_opts")
+            
             # 配置yt-dlp选项
-            ydl_opts = {
-                'format': 'bestaudio/best',
-                'postprocessors': [{
-                    'key': 'FFmpegExtractAudio',
-                    'preferredcodec': 'mp3',
-                }],
+            ydl_opts = base_opts.copy()
+            ydl_opts.update({
                 'outtmpl': output_path.replace('.mp3', ''),
-                'quiet': True,
-                # B站特定的请求配置
-                'sleep_interval_requests': 3,  # 请求间隔最小时间(秒)
-                'ratelimit': 800000,  # 限制下载速度
-                'retries': 3,  # 重试次数
-                'fragment_retries': 3,  # 分片下载重试次数
-                'retry_sleep': 5,  # 重试等待时间(秒)
                 # 添加cookies
                 'cookies': {
                     'SESSDATA': self.sessdata,
                     'bili_jct': self.bili_jct,
                     'buvid3': self.buvid3
                 }
-            }
+            })
             
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])

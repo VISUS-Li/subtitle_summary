@@ -21,20 +21,16 @@ print(f"[{time.time()}] AudioTranscriber模块导入完成，耗时: {time.time(
 
 start_time = time.time()
 import uvicorn
-from api.routers import bili, config, youtube, video
+from api.routers import bili, config, history, youtube, video
 
 print(f"[{time.time()}] 路由模块导入完成，耗时: {time.time() - start_time:.2f}秒")
 
 start_time = time.time()
-from services.bili2text.core.task_manager import TaskManager
 from services.bili2text.core.utils import redirect_stdout_stderr
 from services.bili2text.core.video_processor import VideoProcessor
 import os
 
 print(f"[{time.time()}] 其他核心模块导入完成，耗时: {time.time() - start_time:.2f}秒")
-
-# 创建全局task_manager实例
-task_manager = TaskManager()
 
 
 @asynccontextmanager
@@ -66,7 +62,7 @@ async def lifespan(app: FastAPI):
     print("服务初始化完成")
 
     # 重定向标准输出和错误输出
-    redirect_stdout_stderr(task_manager)
+    redirect_stdout_stderr()
 
     yield
     print("服务关闭...")
@@ -78,9 +74,6 @@ app = FastAPI(
     description="视频字幕获取服务",
     lifespan=lifespan
 )
-
-# 将task_manager添加到app的state中，使其在其他地方可用
-app.state.task_manager = task_manager
 
 # 添加CORS中间件
 app.add_middleware(
@@ -96,6 +89,7 @@ app.include_router(bili.router)
 app.include_router(config.router)
 app.include_router(youtube.router)
 app.include_router(video.router)
+app.include_router(history.router)
 
 # app.include_router(youtube.router)
 

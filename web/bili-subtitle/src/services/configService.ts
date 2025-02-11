@@ -4,6 +4,23 @@ import { API_CONFIG } from '@/config/api'
 
 const API_BASE_URL = API_CONFIG.CONFIG
 
+export interface ConfigItem {
+  service_name: string
+  config_key: string
+  value: any
+  description: string | null
+  category: string
+  created_at: string
+  updated_at: string
+}
+
+interface ConfigDetail {
+  value: any;
+  description: string | null;
+  category: string | null;
+  updated_at: string | null;
+}
+
 export const configService = {
   async getSystemConfig(): Promise<SystemConfig> {
     const response = await axios.get(`${API_BASE_URL}/system`)
@@ -35,12 +52,28 @@ export const configService = {
     }
   },
 
-  async setServiceConfig(serviceName: string, key: string, value: any) {
-    const response = await axios.post(
-      `${API_BASE_URL}/services/${serviceName}/${key}`,
-      { value }
-    )
-    return response.data
+  async getServiceConfigs(serviceName: string): Promise<Record<string, ConfigDetail>> {
+    const response = await axios.get(`${API_BASE_URL}/services/${serviceName}`)
+    return response.data.configs || {}
+  },
+
+  async getCategoryConfigs(category: string): Promise<Record<string, Record<string, any>>> {
+    const response = await axios.get(`${API_BASE_URL}/categories/${category}`)
+    return response.data.configs || {}
+  },
+
+  async setServiceConfig(
+    serviceName: string,
+    configKey: string,
+    value: any,
+    description?: string
+  ): Promise<void> {
+    await axios.post(`${API_BASE_URL}/set`, {
+      service_name: serviceName,
+      config_key: configKey,
+      value,
+      description
+    })
   },
 
   async getServiceConfig(serviceName: string, key: string): Promise<any> {
@@ -55,5 +88,10 @@ export const configService = {
       }
       throw error  // 其他错误继续抛出
     }
+  },
+
+  async getAllCategories(): Promise<string[]> {
+    const response = await axios.get(`${API_BASE_URL}/categories`)
+    return response.data.categories || []
   }
 } 

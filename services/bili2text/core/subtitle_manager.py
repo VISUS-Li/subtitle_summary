@@ -1,3 +1,4 @@
+import os
 import sys
 import uuid
 from contextlib import contextmanager
@@ -417,12 +418,13 @@ class SubtitleManager:
             ).all()
             
             for video in old_videos:
-                if video.audio_path and Path(video.audio_path).exists():
+                if video.audio_path and os.path.exists(video.audio_path):
                     try:
-                        Path(video.audio_path).unlink()
+                        os.remove(video.audio_path)
                         video.audio_path = None
+                        db.commit()
                     except Exception as e:
-                        print(f"清理音频文件失败 {video.audio_path}: {str(e)}") 
+                        print(f"清理音频文件失败 {video.audio_path}: {str(e)}")
 
     def get_video_by_platform_id(self, platform: Platform, platform_vid: str) -> Optional[Dict]:
         """通过平台视频ID获取视频信息

@@ -2,7 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import SubtitleView from '@/views/SubtitleView.vue'
 import HistoryView from '@/views/HistoryView.vue'
-import ConfigPanel from '@/components/ConfigPanel.vue'
+import ConfigManager from '@/components/ConfigManager.vue'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -26,9 +26,12 @@ const router = createRouter({
           component: HistoryView
         },
         {
-          path: '/settings',
-          name: 'settings',
-          component: ConfigPanel
+          path: '/config',
+          name: 'config',
+          component: ConfigManager,
+          meta: {
+            title: '配置管理'
+          }
         }
       ]
     }

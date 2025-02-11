@@ -78,3 +78,7 @@ class DatabaseManager:
         except Exception as e:
             print(f"初始化失败: {str(e)}")
             raise
+
+    @property
+    def config_cache(self):
+        return self._config_cache

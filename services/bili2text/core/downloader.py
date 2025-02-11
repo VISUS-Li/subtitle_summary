@@ -8,7 +8,7 @@ from typing import List, Dict, Optional
 from db.models.subtitle import SubtitleSource, Platform
 from services.bili2text.core.subtitle_manager import SubtitleManager
 from services.bili2text.core.utils import retry_on_failure
-from services.bili2text.config import DOWNLOAD_DIR, MAX_RETRIES, RETRY_DELAY
+from services.config_service import ConfigurationService
 
 
 class AudioDownloader:
@@ -20,12 +20,16 @@ class AudioDownloader:
         Args:
             config_path: 配置文件路径，默认为 config.yaml
         """
-        self.download_dir = DOWNLOAD_DIR
+        config_service = ConfigurationService()
+        self.download_dir = Path(config_service.get_config("system", "download_dir"))
         self._bili_api = None
         self._youtube_api = None
         self._subtitle_manager = None
         self.config_path = config_path
         self.last_api_request_time = 0  # 记录上次请求API的时间
+
+        # 确保下载目录存在
+        self.download_dir.mkdir(parents=True, exist_ok=True)
 
     @property
     def bili_api(self):
@@ -147,7 +151,7 @@ class AudioDownloader:
 
         return True
 
-    @retry_on_failure(max_retries=MAX_RETRIES, delay=RETRY_DELAY)
+    @retry_on_failure()
     async def download_media(self, topic: str, url: str) -> Dict:
         """下载媒体文件
         

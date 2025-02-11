@@ -2,28 +2,27 @@ import time
 import sys
 import asyncio
 from typing import List, Optional
+from pathlib import Path
 from db.models.subtitle import SubtitleSource, Platform
-from services.bili2text.config import get_config
 from services.bili2text.core.subtitle_manager import SubtitleManager
 from services.bili2text.core.utils import retry_on_failure
-from services.bili2text.config import OUTPUT_DIR
+from services.config_service import ConfigurationService
 
 
 class AudioTranscriber:
     """音频转写器,负责将音频转写为文本"""
 
-    def __init__(self, config=None):
-        """初始化转写器
-        
-        Args:
-            config: 配置信息,为None时使用默认配置
-        """
-        self.output_dir = OUTPUT_DIR
+    def __init__(self):
+        """初始化转写器"""
+        config_service = ConfigurationService()
+        self.output_dir = Path(config_service.get_config("system", "output_dir"))
         self._whisper = None
         self._model = None
         self.current_model_name = None
-        self.config = config or get_config()
         self.subtitle_manager = SubtitleManager()
+
+        # 确保输出目录存在
+        self.output_dir.mkdir(parents=True, exist_ok=True)
 
     @property
     def whisper(self):
@@ -59,15 +58,15 @@ class AudioTranscriber:
 
             print(f"模型所在设备: {next(self._model.parameters()).device}")
 
-    @retry_on_failure(max_retries=3, delay=5)
+    @retry_on_failure()  # 使用默认的重试配置
     async def transcribe_file(self, topic: str, audio_path: str, video_id: str, platform: Platform) -> Optional[str]:
         """转录单个音频文件
         
         Args:
+            topic: 主题
             audio_path: 音频文件路径
             video_id: 视频ID
             platform: 平台
-            task_id: 任务ID(可选)
             
         Returns:
             Optional[str]: 转录文本,失败返回None
@@ -76,21 +75,21 @@ class AudioTranscriber:
             Exception: 转录失败
         """
         try:
+            config_service = ConfigurationService()
+            model_name = config_service.get_config("whisper", "model_name")
+            language = config_service.get_config("whisper", "language")
+            prompt = config_service.get_config("whisper", "prompt")
+            
             # 获取视频信息以显示标题
             video_info = self.subtitle_manager.get_video_info(platform, video_id)
             video_title = f"「{video_info['title']}」" if video_info and video_info.get('title') else ''
             print(f"开始转录音频文件 [{platform.value}] {video_id} {video_title}")
 
-            # 使用配置中的值
-            model_name = self.config["DEFAULT_WHISPER_MODEL"]
-            language = self.config["DEFAULT_LANGUAGE"]
-            prompt = self.config["DEFAULT_PROMPT"]
-
             # 加载模型
             self.load_model(model_name)
             print("正在使用Whisper模型进行转录...")
 
-            # 使用whisper进行转录 - 将耗时操作包装在 to_thread 中
+            # 使用whisper进行转录
             result = self._model.transcribe(
                 str(audio_path),
                 initial_prompt=prompt,

@@ -1,74 +1,42 @@
-import sys
-from typing import List, Dict, Optional
-import random
-import time
 import os
+import random
+import sys
+import time
+from typing import List, Dict, Optional, Any
 
 import yt_dlp
 
-from db.service_config import ServiceConfig
-from .utils import retry_on_failure
-from ..config import MAX_RETRIES, RETRY_DELAY
+from services.config_service import ConfigurationService
 
 
 class YoutubeAPI:
     def __init__(self):
-        # 基础配置
-        self.base_opts = {
-            'verbose': True,
-            'no_warnings': False,
-            # 调整参数名称和格式
-            'sleep_interval_requests': 1,  # 请求间隔最小时间(秒)
-            'ratelimit': 900000,  # 修改这里：使用数字而不是字符串 '800K'
-            # 重试配置
-            'retries': 2,  # 重试次数
-            'fragment_retries': 2,  # 分片下载重试次数
-            'retry_sleep': 10,  # 重试等待时间(秒)
-            # 添加代理支持(如果需要)
-            # 'proxy': 'socks5://127.0.0.1:1080',
-        }
-
-        # 视频信息获取配置
-        self.info_opts = {
-            **self.base_opts,
-            'skip_download': True,
-            'extract_flat': True,
-        }
-
-        # 字幕下载配置
-        self.subtitle_opts = {
-            **self.base_opts,
-            'skip_download': True,
-            'writesubtitles': True,
-            'writeautomaticsub': True,
-            'subtitlesformat': 'best',  # 使用best格式
-            'sleep_interval_subtitles': 30,
-        }
-
-        # 音频下载配置
-        self.audio_opts = {
-            **self.base_opts,
-            'format': 'bestaudio/best',
-            'extract_audio': True,
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '192',
-            }],
-            'restrictfilenames': True,
-            'windowsfilenames': True,
-        }
-
+        self.config_service = ConfigurationService()
         self._set_cookies2yt_dlp()
+
+    def _get_youtube_opts(self) -> Dict[str, Any]:
+        """获取YouTube下载选项"""
+        base_opts = self.config_service.get_config("youtube_download", "base_opts")
+        info_opts = self.config_service.get_config("youtube_download", "info_opts")
+        subtitle_opts = self.config_service.get_config("youtube_download", "subtitle_opts")
+        audio_opts = self.config_service.get_config("youtube_download", "audio_opts")
+        
+        return {
+            "base_opts": base_opts,
+            "info_opts": info_opts,
+            "subtitle_opts": subtitle_opts,
+            "audio_opts": audio_opts
+        }
 
     def _set_cookies2yt_dlp(self):
         """更新cookies配置，生成标准的 Netscape cookie 文件"""
         try:
-            db = ServiceConfig()
             cookie_file = "youtube_cookies.txt"
+            return # todo 先不用cookies
 
             # 获取完整的cookie配置
-            cookie_data = db.get_service_config("youtube", "cookie_data")
+            cookie_data = self.config_service.get_config("youtube_download", "cookie_data")
+            opts = self._get_youtube_opts()
 
             if cookie_data:
                 # 如果存在旧的cookie文件，删除它
@@ -79,15 +47,12 @@ class YoutubeAPI:
                 with open(cookie_file, 'w', encoding='utf-8') as f:
                     f.write(cookie_data)
 
-                # 设置 cookiefile 参数
-                # self.base_opts['cookiefile'] = cookie_file
-
-            elif 'cookiefile' in self.base_opts:
+            elif 'cookiefile' in opts["base_opts"]:
                 # 如果没有cookie数据但存在旧的cookie文件，删除它
-                if os.path.exists(self.base_opts['cookiefile']):
-                    os.remove(self.base_opts['cookiefile'])
-                del self.base_opts['cookiefile']
-            return self.base_opts
+                if os.path.exists(opts["base_opts"]['cookiefile']):
+                    os.remove(opts["base_opts"]['cookiefile'])
+                del opts["base_opts"]['cookiefile']
+            return opts["base_opts"]
 
         except Exception as e:
             print(f"从配置初始化YouTube API失败: {str(e)}")
@@ -105,13 +70,13 @@ class YoutubeAPI:
             return 'en'
         return None
 
-    @retry_on_failure(max_retries=MAX_RETRIES, delay=RETRY_DELAY)
     def get_subtitle(self, video_id: str) -> Optional[str]:
         """使用yt-dlp获取YouTube字幕"""
         try:
             print(f"尝试获取YouTube字幕: {video_id}")
             self._set_cookies2yt_dlp()
-            with yt_dlp.YoutubeDL(self.subtitle_opts) as ydl:
+            opts = self._get_youtube_opts()
+            with yt_dlp.YoutubeDL(opts["subtitle_opts"]) as ydl:
                 info = ydl.extract_info(video_id, download=False)
                 if not info:
                     print(f"获取视频信息失败: {video_id}")
@@ -163,7 +128,8 @@ class YoutubeAPI:
         try:
             print(f"获取视频信息: {url}")
             self._set_cookies2yt_dlp()
-            with yt_dlp.YoutubeDL(self.info_opts) as ydl:
+            opts = self._get_youtube_opts()
+            with yt_dlp.YoutubeDL(opts["info_opts"]) as ydl:
                 return ydl.extract_info(url, download=False)
         except Exception as e:
             error_msg = f"获取视频信息失败: {str(e)}"
@@ -187,7 +153,8 @@ class YoutubeAPI:
             remaining = max_results
 
             # 在基础配置上添加搜索特有的配置
-            search_opts = self.info_opts.copy()
+            opts = self._get_youtube_opts()
+            search_opts = opts["info_opts"].copy()
 
             while remaining > 0:
                 current_batch = min(batch_size, remaining)
@@ -241,16 +208,14 @@ class YoutubeAPI:
     def download_audio(self, url: str, output_path: str) -> str:
         """下载音频"""
         try:
+            opts = self._get_youtube_opts()
             # 移除 .mp3 扩展名，因为 yt-dlp 会自动添加正确的扩展名
             base_path = output_path.replace('.mp3', '')
-            opts = {
-                **self.audio_opts,
-                'outtmpl': f'{base_path}.%(ext)s',  # 确保正确的输出格式
-            }
+            opts["audio_opts"]["outtmpl"] = f'{base_path}.%(ext)s'  # 确保正确的输出格式
             print(f"开始下载音频: {url}")
             self._set_cookies2yt_dlp()
 
-            with yt_dlp.YoutubeDL(opts) as ydl:
+            with yt_dlp.YoutubeDL(opts["audio_opts"]) as ydl:
                 try:
                     ydl.extract_info(url, download=True)
                     return output_path

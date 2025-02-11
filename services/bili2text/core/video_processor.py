@@ -179,14 +179,7 @@ class VideoProcessor:
             
             # 3. 生成最终脚本
             try:
-                script = await self._generate_final_script(topic, keyword, platform)
-                if script:
-                    print("脚本生成成功")
-                    results.append({
-                        'type': 'script',
-                        'content': script,
-                        'keyword': keyword
-                    })
+                asyncio.create_task(self._background_generate_script(topic, keyword, platform, results))
             except Exception as e:
                 print(f"生成最终脚本失败: {str(e)}")
             
@@ -196,6 +189,21 @@ class VideoProcessor:
             error_msg = f"批量处理失败: {str(e)}"
             print(error_msg, file=sys.stderr)
             raise
+
+    async def _background_generate_script(self, topic: str, keyword: str, platform: Platform, results: List[Dict]):
+        """后台生成脚本的任务"""
+        try:
+            script = await self._generate_final_script(topic, keyword, platform)
+            if script:
+                print("脚本生成成功")
+                results.append({
+                    'type': 'script',
+                    'content': script,
+                    'keyword': keyword
+                })
+                
+        except Exception as e:
+            print(f"后台生成脚本失败: {str(e)}")
 
     async def _download_and_process(self, topic: str, url: str, platform: Platform) -> Dict:
         """下载并处理视频

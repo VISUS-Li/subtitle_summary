@@ -19,9 +19,9 @@ export const menuItems: MenuItem[] = [
     path: '/history'
   },
   {
-    key: 'settings',
+    key: 'config',
     label: '系统设置',
     icon: 'Setting',
-    path: '/settings'
+    path: '/config'
   }
 ] 

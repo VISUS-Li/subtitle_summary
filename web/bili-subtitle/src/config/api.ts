@@ -9,6 +9,7 @@ export const API_CONFIG = {
   WS_BILI: `${WS_BASE_URL}/bili/ws`,
   WS_YOUTUBE: `${WS_BASE_URL}/youtube/ws`,
   VIDEO: `${BASE_URL}/video`,
+  HISTORY:`${BASE_URL}/history`,
 }
 
 export default API_CONFIG 
