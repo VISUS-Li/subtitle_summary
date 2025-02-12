@@ -134,12 +134,12 @@ class AudioDownloader:
         dir_path = os.path.dirname(file_path)
         base_name = os.path.basename(file_base)
 
-        for f in os.listdir(dir_path):
-            if f.startswith(base_name):
-                full_path = os.path.join(dir_path, f)
-                if full_path != file_path:  # 如果不是目标mp3文件
-                    print(f"发现同名临时文件: {f}")
-                    os.remove(full_path)  # 删除临时文件
+        # for f in os.listdir(dir_path):
+        #     if f.startswith(base_name):
+        #         full_path = os.path.join(dir_path, f)
+        #         if full_path != file_path:  # 如果不是目标mp3文件
+        #             print(f"发现同名临时文件: {f}")
+        #             os.remove(full_path)  # 删除临时文件
 
         # 检查目标mp3文件
         if not os.path.exists(file_path):

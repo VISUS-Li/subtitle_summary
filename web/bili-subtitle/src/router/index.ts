@@ -3,6 +3,7 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import SubtitleView from '@/views/SubtitleView.vue'
 import HistoryView from '@/views/HistoryView.vue'
 import ConfigManager from '@/components/ConfigManager.vue'
+import SingleVideoView from '@/views/SingleVideoView.vue'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -32,6 +33,11 @@ const router = createRouter({
           meta: {
             title: '配置管理'
           }
+        },
+        {
+          path: '/single',
+          name: 'single',
+          component: SingleVideoView
         }
       ]
     }

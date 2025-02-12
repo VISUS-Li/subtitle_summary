@@ -21,6 +21,11 @@ class YoutubeAPI:
         subtitle_opts = self.config_service.get_config("youtube_download", "subtitle_opts")
         audio_opts = self.config_service.get_config("youtube_download", "audio_opts")
         
+        # 所有选项继承base_opts
+        info_opts = {**base_opts, **info_opts} 
+        subtitle_opts = {**base_opts, **subtitle_opts}
+        audio_opts = {**base_opts, **audio_opts}
+        
         return {
             "base_opts": base_opts,
             "info_opts": info_opts,

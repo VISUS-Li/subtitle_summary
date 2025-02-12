@@ -23,5 +23,11 @@ export const menuItems: MenuItem[] = [
     label: '系统设置',
     icon: 'Setting',
     path: '/config'
+  },
+  {
+    key: 'single',
+    label: '单视频处理',
+    icon: 'VideoCamera',
+    path: '/single'
   }
 ] 

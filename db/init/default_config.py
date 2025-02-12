@@ -41,6 +41,11 @@ DEFAULT_CONFIGS = {
                     "extract_audio": True,
                     "audio_format": "mp3",
                     "audio_quality": 0,
+                    "postprocessors": [{
+                        "key": "FFmpegExtractAudio",
+                        "preferredcodec": "mp3",
+                        "preferredquality": "192",
+                    }],
                 },
                 "description": "音频下载选项配置"
             },

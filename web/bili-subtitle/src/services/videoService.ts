@@ -58,23 +58,19 @@ export const videoService = {
 
   // 视频处理方法
   async getVideoTextWithProgress(
-    platform: 'bilibili' | 'youtube',
-    topic: string, 
-    videoId: string, 
+    platform: 'bilibili' | 'youtube' | 'auto',
+    videoUrl: string, 
     onProgress: (progress: Progress) => void
   ): Promise<{ task_id: string }> {
     try {
-      const baseUrl = platform === 'bilibili' ? API_CONFIG.BILI : API_CONFIG.YOUTUBE
-      const wsUrl = platform === 'bilibili' ? API_CONFIG.WS_BILI : API_CONFIG.WS_YOUTUBE
-      const extractedId = platform === 'bilibili' 
-        ? extractVideoId.bilibili(videoId)
-        : extractVideoId.youtube(videoId)
-
       const response = await axios.post(
-        `${baseUrl}/video/${extractedId}`,
-        { topic },
+        `${API_CONFIG.VIDEO}/process`,
+        { 
+          url: videoUrl,
+          platform
+        },
         {
-          timeout: 3000,
+          timeout: 300000,
           headers: { 'Content-Type': 'application/json' }
         }
       )

@@ -78,26 +78,72 @@ class ConfigurationService:
         if not isinstance(value, str):
             return value
             
-        # 尝试转换为JSON
+        # 预处理字符串
+        def clean_json_string(s: str) -> str:
+            # 移除首尾的单引号（如果存在）
+            if s.startswith("'") and s.endswith("'"):
+                s = s[1:-1]
+            
+            # 处理多行字符串，保留基本格式但移除多余空白
+            lines = s.split('\n')
+            cleaned_lines = []
+            for line in lines:
+                # 移除行首尾的空白字符
+                line = line.strip()
+                # 跳过空行
+                if not line:
+                    continue
+                # 移除行尾的逗号（如果后面跟着 } 或 ]）
+                if line.endswith(',') and any(next_char in ']}' for next_char in ''.join(lines[lines.index(line)+1:]).strip()):
+                    line = line[:-1]
+                cleaned_lines.append(line)
+            
+            # 重新组合成单个字符串
+            s = ''.join(cleaned_lines)
+            
+            # 替换所有单引号为双引号（但不替换字符串内的单引号）
+            in_string = False
+            result = []
+            i = 0
+            while i < len(s):
+                if s[i] == '\\':  # 处理转义字符
+                    result.append(s[i:i+2])
+                    i += 2
+                    continue
+                if s[i] == '"':
+                    in_string = not in_string
+                if s[i] == "'" and not in_string:
+                    result.append('"')
+                else:
+                    result.append(s[i])
+                i += 1
+            
+            return ''.join(result)
+
+        # 尝试解析JSON
         try:
-            return json.loads(value)
+            cleaned_value = clean_json_string(value)
+            return json.loads(cleaned_value)
         except json.JSONDecodeError:
             pass
-            
-        # 尝试转换为布尔值
-        if value.lower() in ('true', 'false'):
-            return value.lower() == 'true'
+
+        # 如果JSON解析失败，尝试其他类型转换
+        processed_value = value.strip()
+        
+        # 尝试转换为布尔值    
+        if processed_value.lower() in ('true', 'false'):
+            return processed_value.lower() == 'true'
             
         # 尝试转换为整数
         try:
-            if value.isdigit() or (value.startswith('-') and value[1:].isdigit()):
-                return int(value)
+            if processed_value.isdigit() or (processed_value.startswith('-') and processed_value[1:].isdigit()):
+                return int(processed_value)
         except ValueError:
             pass
             
         # 尝试转换为浮点数
         try:
-            return float(value)
+            return float(processed_value)
         except ValueError:
             pass
             
@@ -108,7 +154,8 @@ class ConfigurationService:
         """获取配置值"""
         cache_key = (service_name, config_key)
         if cache_key in self._config_cache:
-            return self._convert_value(self._config_cache[cache_key])
+            value = self._config_cache[cache_key]
+            return self._convert_value(value)
 
         from db.init.manager import DatabaseManager
         with DatabaseManager().SessionLocal() as db:
@@ -118,8 +165,9 @@ class ConfigurationService:
             ).first()
 
             if config:
-                self._config_cache[cache_key] = config.value
-                return self._convert_value(config.value)
+                value = config.value
+                self._config_cache[cache_key] = value
+                return self._convert_value(value)
 
             # 如果数据库中不存在，返回默认配置
             if (service_name in DEFAULT_CONFIGS and

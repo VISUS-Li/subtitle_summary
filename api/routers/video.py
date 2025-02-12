@@ -43,7 +43,6 @@ class VideoUrlRequest(BaseModel):
     """视频URL请求模型"""
     url: HttpUrl
     language: Optional[str] = "zh"
-    topic: str  # 新增必填字段
 
 
 class VideoResponse(BaseModel):
@@ -117,7 +116,7 @@ async def process_video(request: VideoUrlRequest):
         
         # 2. 处理视频获取字幕
         result, summary_task = await video_processor.process_single_video(
-            topic=request.topic,  # 添加topic参数
+            "single",
             video_id=video_id,
             platform=platform
         )
@@ -218,4 +217,44 @@ async def batch_process_videos(
     except Exception as e:
         error_msg = f"创建批量处理任务失败: {str(e)}"
         print(error_msg, file=sys.stderr)
-        raise HTTPException(status_code=500, detail=error_msg) 
+        raise HTTPException(status_code=500, detail=error_msg)
+
+
+class VideoProcessRequest(BaseModel):
+    """视频处理请求模型"""
+    url: str
+    platform: str = 'auto'  # 'auto', 'bilibili', 或 'youtube'
+
+
+@router.post("/process")
+async def process_video(request: VideoProcessRequest, background_tasks: BackgroundTasks):
+    """处理单个视频"""
+    if not video_processor:
+        raise HTTPException(status_code=400, detail="服务未初始化")
+        
+    try:
+        # 自动判断平台
+        if request.platform == 'auto':
+            try:
+                video_id, platform = parse_video_url(request.url)
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e))
+        else:
+            platform = Platform.BILIBILI if request.platform == 'bilibili' else Platform.YOUTUBE
+            video_id = request.url
+
+        task_id = str(uuid.uuid4())
+        print(f"创建视频处理任务: {task_id}")
+
+        # 创建异步任务，使用默认主题
+        background_tasks.add_task(
+            video_processor.process_single_video,
+            "default",  # 使用默认主题
+            video_id,
+            platform
+        )
+
+        return {"task_id": task_id}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) 
