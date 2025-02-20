@@ -17,6 +17,6 @@ export default defineConfig({
   },
   server: {
     host: '0.0.0.0', // 监听所有IP地址
-    port: 8080      // 默认端口
+    port: 3201      // 默认端口
   }
 })

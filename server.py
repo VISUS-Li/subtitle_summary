@@ -94,5 +94,5 @@ app.include_router(history.router)
 # app.include_router(youtube.router)
 
 if __name__ == "__main__":
-    print("启动服务器 http://localhost:8000")
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    print("启动服务器 http://localhost:3200")
+    uvicorn.run(app, host="0.0.0.0", port=3200)
