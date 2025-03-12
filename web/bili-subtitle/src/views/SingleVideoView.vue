@@ -7,10 +7,18 @@ import ProcessLog from '@/components/ProcessLog.vue'
 const loading = ref(false)
 const videoUrl = ref('')
 const processLogs = ref<any[]>([])
+const platform = ref('auto')
+
+const platformOptions = [
+  { label: '自动检测', value: 'auto' },
+  { label: 'B站', value: 'bilibili' },
+  { label: 'YouTube', value: 'youtube' },
+  { label: '小宇宙', value: 'xiaoyuzhou' }
+]
 
 const handleProcess = async () => {
   if (!videoUrl.value) {
-    ElMessage.warning('请填写视频地址')
+    ElMessage.warning('请填写视频/播客地址')
     return
   }
 
@@ -18,17 +26,26 @@ const handleProcess = async () => {
     loading.value = true
     processLogs.value = []
 
-    const { task_id } = await videoService.getVideoTextWithProgress(
-      'auto',
-      videoUrl.value,
-      (progress) => {
-        processLogs.value.push(progress)
-      }
-    )
+    if (platform.value === 'xiaoyuzhou') {
+      const { task_id } = await videoService.processPodcast(
+        videoUrl.value,
+        (progress) => {
+          processLogs.value.push(progress)
+        }
+      )
+    } else {
+      const { task_id } = await videoService.getVideoTextWithProgress(
+        platform.value as any,
+        videoUrl.value,
+        (progress) => {
+          processLogs.value.push(progress)
+        }
+      )
+    }
 
-    ElMessage.success('视频处理任务已提交')
+    ElMessage.success('处理任务已提交')
   } catch (error: any) {
-    ElMessage.error(error.message || '视频处理失败')
+    ElMessage.error(error.message || '处理失败')
   } finally {
     loading.value = false
   }
@@ -38,14 +55,25 @@ const handleProcess = async () => {
 <template>
   <div class="single-video-container">
     <div class="content-wrapper">
-      <h2 class="page-title">单视频字幕获取</h2>
+      <h2 class="page-title">单视频/播客字幕获取</h2>
       
       <el-card class="process-card">
         <el-form label-position="top">
-          <el-form-item label="视频地址">
+          <el-form-item label="平台">
+            <el-select v-model="platform" class="platform-select">
+              <el-option
+                v-for="option in platformOptions"
+                :key="option.value"
+                :label="option.label"
+                :value="option.value"
+              />
+            </el-select>
+          </el-form-item>
+
+          <el-form-item label="视频/播客地址">
             <el-input
               v-model="videoUrl"
-              placeholder="请输入B站或YouTube视频地址"
+              :placeholder="platform === 'xiaoyuzhou' ? '请输入小宇宙播客地址' : '请输入B站或YouTube视频地址'"
             />
           </el-form-item>
 
@@ -113,4 +141,8 @@ const handleProcess = async () => {
 :deep(.el-input__wrapper) {
   background-color: var(--el-input-bg-color, var(--el-bg-color-overlay));
 }
-</style> 
+
+.platform-select {
+  width: 100%;
+}
+</style>

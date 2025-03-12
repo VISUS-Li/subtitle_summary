@@ -3,7 +3,7 @@ import random
 import sys
 import time
 from typing import List, Dict, Optional, Any
-
+import pkg_resources
 import yt_dlp
 
 from services.config_service import ConfigurationService
@@ -12,7 +12,33 @@ from services.config_service import ConfigurationService
 class YoutubeAPI:
     def __init__(self):
         self.config_service = ConfigurationService()
+        self._check_dependencies()
         self._set_cookies2yt_dlp()
+    
+    def _check_dependencies(self):
+        """检查依赖包版本"""
+        try:
+            requests_version = pkg_resources.get_distribution('requests').version
+            yt_dlp_version = pkg_resources.get_distribution('yt-dlp').version
+            print(f"当前使用的包版本: requests={requests_version}, yt-dlp={yt_dlp_version}")
+            
+            # 尝试更新yt-dlp到最新版本
+            yt_dlp.update.__main__()
+        except Exception as e:
+            print(f"依赖检查过程中出现警告（不影响使用）: {str(e)}")
+
+    def _create_yt_dlp_instance(self, opts: dict) -> yt_dlp.YoutubeDL:
+        """创建一个新的yt-dlp实例，带有错误处理"""
+        try:
+            return yt_dlp.YoutubeDL(opts)
+        except AttributeError as e:
+            if "'RequestsSession' object has no attribute 'mount'" in str(e):
+                print("检测到requests版本兼容性问题，尝试降级处理...")
+                # 如果出现mount错误，尝试使用替代的下载器
+                if 'downloader' not in opts:
+                    opts['downloader'] = 'native'
+                return yt_dlp.YoutubeDL(opts)
+            raise
 
     def _get_youtube_opts(self) -> Dict[str, Any]:
         """获取YouTube下载选项"""
@@ -134,8 +160,19 @@ class YoutubeAPI:
             print(f"获取视频信息: {url}")
             self._set_cookies2yt_dlp()
             opts = self._get_youtube_opts()
-            with yt_dlp.YoutubeDL(opts["info_opts"]) as ydl:
-                return ydl.extract_info(url, download=False)
+            
+            try:
+                with self._create_yt_dlp_instance(opts["info_opts"]) as ydl:
+                    return ydl.extract_info(url, download=False)
+            except Exception as e:
+                if "SSL" in str(e) or "mount" in str(e):
+                    # 如果出现SSL错误或mount错误，尝试使用替代配置
+                    alt_opts = opts["info_opts"].copy()
+                    alt_opts['downloader'] = 'native'
+                    with self._create_yt_dlp_instance(alt_opts) as ydl:
+                        return ydl.extract_info(url, download=False)
+                raise
+                
         except Exception as e:
             error_msg = f"获取视频信息失败: {str(e)}"
             print(error_msg, file=sys.stderr)
@@ -214,19 +251,24 @@ class YoutubeAPI:
         """下载音频"""
         try:
             opts = self._get_youtube_opts()
-            # 移除 .mp3 扩展名，因为 yt-dlp 会自动添加正确的扩展名
             base_path = output_path.replace('.mp3', '')
-            opts["audio_opts"]["outtmpl"] = f'{base_path}.%(ext)s'  # 确保正确的输出格式
+            opts["audio_opts"]["outtmpl"] = f'{base_path}.%(ext)s'
             print(f"开始下载音频: {url}")
             self._set_cookies2yt_dlp()
 
-            with yt_dlp.YoutubeDL(opts["audio_opts"]) as ydl:
-                try:
+            try:
+                with self._create_yt_dlp_instance(opts["audio_opts"]) as ydl:
                     ydl.extract_info(url, download=True)
                     return output_path
-                except Exception as e:
-                    if "EOF occurred in violation of protocol" in str(e):
-                        raise Exception(f"SSL连接错误: {str(e)}")
-                    raise
+            except Exception as e:
+                if "SSL" in str(e) or "mount" in str(e):
+                    # 如果出现SSL错误或mount错误，尝试使用替代配置
+                    alt_opts = opts["audio_opts"].copy()
+                    alt_opts['downloader'] = 'native'
+                    with self._create_yt_dlp_instance(alt_opts) as ydl:
+                        ydl.extract_info(url, download=True)
+                        return output_path
+                raise
+                
         except Exception as e:
             raise Exception(f"下载音频失败: {str(e)}")

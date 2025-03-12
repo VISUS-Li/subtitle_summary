@@ -102,7 +102,7 @@ class VideoProcessor:
                         
                     # 检查是否需要等待
                     current_time = time.time()
-                    if platform == Platform.BILIBILI:
+                    if platform in [Platform.BILIBILI, Platform.XIAOYUZHOU]:  # 添加小宇宙平台的延迟控制
                         time_since_last_request = current_time - self.last_api_request_time
                         delay = random.uniform(10, 20)  # 10-20秒随机延迟
                         if not existing_video and time_since_last_request < delay:
@@ -260,6 +260,8 @@ class VideoProcessor:
             return f"https://www.youtube.com/watch?v={video_id}"
         elif platform == Platform.BILIBILI:
             return f"https://www.bilibili.com/video/{video_id}"
+        elif platform == Platform.XIAOYUZHOU:
+            return f"https://www.xiaoyuzhoufm.com/episode/{video_id}"
         else:
             raise ValueError(f"不支持的平台: {platform}") 
 
@@ -298,4 +300,4 @@ class VideoProcessor:
                 
         except Exception as e:
             print(f"WebSocket处理错误: {str(e)}")
-            await websocket.close() 
+            await websocket.close()

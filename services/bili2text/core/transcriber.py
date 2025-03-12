@@ -113,7 +113,7 @@ class AudioTranscriber:
                     content=result["text"],
                     timed_content=webvtt_result,
                     source=SubtitleSource.WHISPER,
-                    platform=platform,
+                    platform=platform.value,
                     platform_vid=video_id,
                     language=language,
                     model_name=model_name,

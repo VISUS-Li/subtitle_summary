@@ -43,6 +43,7 @@ export interface Progress {
 export enum PlatformChoice {
   BILIBILI = 'bilibili',
   YOUTUBE = 'youtube',
+  XIAOYUZHOU = 'xiaoyuzhou',
   ALL = 'all'
 }
 
@@ -52,4 +53,12 @@ export interface BatchProcessRequest {
   keyword: string
   max_results: number
   platform_choice: PlatformChoice
+}
+
+export interface PodcastResult {
+  episode_id: string;
+  title: string;
+  description?: string;
+  transcript?: string;
+  summary?: string;
 }

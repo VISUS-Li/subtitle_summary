@@ -10,6 +10,11 @@ class Platform(enum.Enum):
     """视频平台"""
     BILIBILI = "bilibili"
     YOUTUBE = "youtube"
+    XIAOYUZHOU = "xiaoyuzhou"  # 添加小宇宙平台
+
+    @classmethod
+    def get_values(cls):
+        return [member.value for member in cls]
 
 
 class SubtitleSource(enum.Enum):
@@ -17,13 +22,17 @@ class SubtitleSource(enum.Enum):
     OFFICIAL = "official"  # 官方外挂字幕
     WHISPER = "whisper"  # Whisper生成字幕
 
+    @classmethod
+    def get_values(cls):
+        return [member.value for member in cls]
+
 
 class Video(Base):
     """视频信息表"""
     __tablename__ = "videos"
 
     id = Column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))  # 内部ID
-    platform = Column(Enum(Platform), nullable=False)
+    platform = Column(String(20), nullable=False)  # 改为字符串存储
 
     # 平台特定信息
     platform_vid = Column(String(64))  # 平台视频ID (YouTube vid 或 B站 bvid)
@@ -58,6 +67,14 @@ class Video(Base):
     # 关联字幕
     subtitles = relationship("Subtitle", back_populates="video")
 
+    def set_platform(self, platform: Platform):
+        """设置平台"""
+        self.platform = platform.value
+
+    def get_platform(self) -> Platform:
+        """获取平台枚举值"""
+        return Platform(self.platform)
+
 
 class TaskStatus(enum.Enum):
     """任务状态"""
@@ -65,6 +82,10 @@ class TaskStatus(enum.Enum):
     PROCESSING = "processing"  # 处理中
     COMPLETED = "completed"    # 完成
     FAILED = "failed"      # 失败
+
+    @classmethod
+    def get_values(cls):
+        return [member.value for member in cls]
 
 
 class SubtitleSummary(Base):
@@ -81,7 +102,7 @@ class SubtitleSummary(Base):
     subtitle = relationship("Subtitle", back_populates="summary")
 
     # 添加新字段
-    status = Column(Enum(TaskStatus), nullable=False, default=TaskStatus.PENDING)
+    status = Column(String(20), nullable=False, default=TaskStatus.PENDING.value)  # 改为字符串存储
     error_message = Column(Text, nullable=True)  # 错误信息
     retry_count = Column(Integer, default=0)     # 重试次数
     workflow_id = Column(String(64), nullable=True)  # Coze工作流ID
@@ -93,6 +114,14 @@ class SubtitleSummary(Base):
     score = Column(Float, nullable=True)  # 关联分数
     point_details = Column(Text(length=4294967295), nullable=True)  # 详细要点总结
 
+    def set_status(self, status: TaskStatus):
+        """设置状态"""
+        self.status = status.value
+
+    def get_status(self) -> TaskStatus:
+        """获取状态枚举值"""
+        return TaskStatus(self.status)
+
 
 class Subtitle(Base):
     """字幕信息表"""
@@ -101,8 +130,8 @@ class Subtitle(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     video_id = Column(String(64), ForeignKey("videos.id"), nullable=False)
     platform_vid = Column(String(64), nullable=False)
-    platform = Column(Enum(Platform), nullable=False)
-    source = Column(Enum(SubtitleSource), nullable=False)
+    platform = Column(String(20), nullable=False)  # 改为字符串存储
+    source = Column(String(20), nullable=False)    # 改为字符串存储
     # 使用 LONGTEXT 存储纯文本内容
     content = Column(Text(length=4294967295), nullable=False)
     # 使用 JSON 类型存储带时间戳的内容，MySQL会自动处理序列化
@@ -117,6 +146,22 @@ class Subtitle(Base):
     # 新增字段
     summary = relationship("SubtitleSummary", back_populates="subtitle", uselist=False)
 
+    def set_platform(self, platform: Platform):
+        """设置平台"""
+        self.platform = platform.value
+
+    def get_platform(self) -> Platform:
+        """获取平台枚举值"""
+        return Platform(self.platform)
+
+    def set_source(self, source: SubtitleSource):
+        """设置来源"""
+        self.source = source.value
+
+    def get_source(self) -> SubtitleSource:
+        """获取来源枚举值"""
+        return SubtitleSource(self.source)
+
     def __repr__(self):
         return f"<Subtitle(id={self.id}, video_id={self.video_id}, language={self.language})>"
 
@@ -127,7 +172,7 @@ class GeneratedScript(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     topic = Column(String(255), nullable=False, comment='主题/关键词')
-    platform = Column(Enum(Platform), nullable=False, comment='平台')
+    platform = Column(String(20), nullable=False, comment='平台')  # 改为字符串存储
     content = Column(Text(length=4294967295), nullable=False, comment='脚本内容')
     video_count = Column(Integer, nullable=False, comment='涉及的视频数量')
     video_ids = Column(JSON, nullable=False, comment='相关视频ID列表')
@@ -137,6 +182,14 @@ class GeneratedScript(Base):
     create_time = Column(DateTime, default=datetime.utcnow)
     update_time = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
+    def set_platform(self, platform: Platform):
+        """设置平台"""
+        self.platform = platform.value
+
+    def get_platform(self) -> Platform:
+        """获取平台枚举值"""
+        return Platform(self.platform)
+
     def __repr__(self):
         return f"<GeneratedScript(id={self.id}, topic='{self.topic}', platform={self.platform})>"
 
@@ -155,5 +208,7 @@ def get_video_url(platform_vid: str, platform: Platform) -> str:
         return f"https://www.youtube.com/watch?v={platform_vid}"
     elif platform == Platform.BILIBILI:
         return f"https://www.bilibili.com/video/{platform_vid}"
+    elif platform == Platform.XIAOYUZHOU:
+        return f"https://www.xiaoyuzhoufm.com/episode/{platform_vid}"
     else:
         raise ValueError(f"不支持的平台: {platform}")

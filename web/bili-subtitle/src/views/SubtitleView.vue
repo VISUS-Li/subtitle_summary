@@ -13,6 +13,13 @@ const maxResults = ref(20)
 const selectedPlatform = ref<PlatformChoice>(PlatformChoice.ALL)
 const processLogs = ref<any[]>([])
 
+const platformOptions = [
+  { label: '全部', value: PlatformChoice.ALL },
+  { label: 'B站', value: PlatformChoice.BILIBILI },
+  { label: 'YouTube', value: PlatformChoice.YOUTUBE },
+  { label: '小宇宙', value: PlatformChoice.XIAOYUZHOU }
+]
+
 const handleBatchProcess = async () => {
   if (!topic.value || !keyword.value) {
     ElMessage.warning('请填写完整的主题和关键词')
@@ -160,4 +167,4 @@ const handleBatchProcess = async () => {
 :deep(.el-select__wrapper) {
   background-color: var(--el-input-bg-color, var(--el-bg-color-overlay));
 }
-</style> 
+</style>

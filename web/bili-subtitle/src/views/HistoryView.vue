@@ -39,7 +39,8 @@ const topics = ref<string[]>([])
 const platformOptions = [
   { label: '全部', value: '' },
   { label: 'B站', value: 'bilibili' },
-  { label: 'YouTube', value: 'youtube' }
+  { label: 'YouTube', value: 'youtube' },
+  { label: '小宇宙', value: 'xiaoyuzhou' }
 ]
 
 // 计算属性：当前显示的数据
@@ -864,4 +865,4 @@ const getVideoUrl = (platform: string, videoId: string) => {
 :deep(.el-tabs__item.is-active) {
   font-weight: bold;
 }
-</style> 
+</style>

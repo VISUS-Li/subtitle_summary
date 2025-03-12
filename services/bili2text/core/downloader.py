@@ -25,6 +25,7 @@ class AudioDownloader:
         self._bili_api = None
         self._youtube_api = None
         self._subtitle_manager = None
+        self._xiaoyuzhou_api = None  # 添加小宇宙API实例
         self.config_path = config_path
         self.last_api_request_time = 0  # 记录上次请求API的时间
 
@@ -50,6 +51,17 @@ class AudioDownloader:
             self._youtube_api = YoutubeAPI()
             print(f"[{time.time()}] YouTube API初始化完成，耗时: {time.time() - start_time:.2f}秒")
         return self._youtube_api
+
+    @property
+    def xiaoyuzhou_api(self):
+        """获取小宇宙API实例"""
+        if self._xiaoyuzhou_api is None:
+            start_time = time.time()
+            print(f"[{time.time()}] 开始导入并初始化小宇宙API...")
+            from services.bili2text.core.xiaoyuzhou import XiaoyuzhouAPI
+            self._xiaoyuzhou_api = XiaoyuzhouAPI()
+            print(f"[{time.time()}] 小宇宙API初始化完成，耗时: {time.time() - start_time:.2f}秒")
+        return self._xiaoyuzhou_api
 
     @property
     def subtitle_manager(self):
@@ -92,7 +104,7 @@ class AudioDownloader:
         return None
 
     def _extract_video_id(self, url: str) -> str:
-        """从URL中提取视频ID
+        """从URL中提取视频/播客ID
         
         Args:
             url: 视频URL
@@ -103,6 +115,9 @@ class AudioDownloader:
         Raises:
             ValueError: URL格式无效
         """
+        if 'xiaoyuzhoufm.com' in url.lower():
+            # 处理小宇宙URL
+            return url.split('/')[-1]
         if 'youtube.com' in url.lower() or 'youtu.be' in url.lower():
             if 'youtu.be' in url:
                 return url.split('/')[-1]
@@ -171,7 +186,16 @@ class AudioDownloader:
         try:
             print(f"开始下载媒体: {url}")
             video_id = self._extract_video_id(url)
-            platform = Platform.YOUTUBE if 'youtube' in url.lower() else Platform.BILIBILI
+            
+            # 确定平台
+            if 'youtube' in url.lower():
+                platform = Platform.YOUTUBE
+            elif 'bilibili' in url.lower():
+                platform = Platform.BILIBILI
+            elif 'xiaoyuzhoufm.com' in url.lower():
+                platform = Platform.XIAOYUZHOU
+            else:
+                raise ValueError("不支持的平台")
 
             # 获取视频信息以显示标题
             video_info = self.subtitle_manager.get_video_info(platform, video_id)
@@ -191,7 +215,7 @@ class AudioDownloader:
                 }
 
             # 2. 根据平台选择API并检查请求频率
-            api = self.youtube_api if platform == Platform.YOUTUBE else self.bili_api
+            api = self.youtube_api if platform == Platform.YOUTUBE else self.bili_api if platform == Platform.BILIBILI else self.xiaoyuzhou_api
 
             # 对B站API请求进行频率控制
             if platform == Platform.BILIBILI:
@@ -258,27 +282,56 @@ class AudioDownloader:
                 os.remove(audio_path)
 
             try:
-                audio_path = api.download_audio(url, audio_path)
-                # 验证下载的文件
-                if not self._verify_downloaded_file(audio_path):
-                    raise Exception("下载完成但文件无效")
+                if platform == Platform.XIAOYUZHOU:
+                    # 使用小宇宙API处理
+                    episode_info = self.xiaoyuzhou_api._extract_episode_info(url)
+                    audio_path = self.xiaoyuzhou_api._download_audio(
+                        episode_info["audio_url"], 
+                        video_id
+                    )
+                    
+                    # 保存视频信息
+                    self.subtitle_manager.save_video_info(
+                        {
+                            'id': video_id,
+                            'title': episode_info['title'],
+                            'description': episode_info['description'],
+                            'url': url
+                        },
+                        platform,
+                        audio_path=audio_path
+                    )
+                    
+                    return {
+                        'type': 'audio',
+                        'content': audio_path,
+                        'video_id': video_id,
+                        'platform': platform,
+                        'title': episode_info['title']
+                    }
+                else:
+                    # 现有的B站和YouTube处理逻辑
+                    audio_path = api.download_audio(url, audio_path)
+                    # 验证下载的文件
+                    if not self._verify_downloaded_file(audio_path):
+                        raise Exception("下载完成但文件无效")
 
-                print(f"音频下载完成: {audio_path}")
+                    print(f"音频下载完成: {audio_path}")
 
-                # 保存视频信息
-                print("保存视频信息...")
-                self.subtitle_manager.save_video_info(
-                    api_video_info,
-                    platform,
-                    audio_path=audio_path
-                )
+                    # 保存视频信息
+                    print("保存视频信息...")
+                    self.subtitle_manager.save_video_info(
+                        api_video_info,
+                        platform,
+                        audio_path=audio_path
+                    )
 
-                return {
-                    'type': 'audio',
-                    'content': audio_path,
-                    'video_id': video_id,
-                    'platform': platform
-                }
+                    return {
+                        'type': 'audio',
+                        'content': audio_path,
+                        'video_id': video_id,
+                        'platform': platform
+                    }
 
             except Exception as e:
                 # 如果下载失败，清理可能存在的不完整文件

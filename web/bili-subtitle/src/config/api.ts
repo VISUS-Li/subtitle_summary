@@ -6,10 +6,12 @@ export const API_CONFIG = {
   CONFIG: `${BASE_URL}/config`,
   BILI: `${BASE_URL}/bili`,
   YOUTUBE: `${BASE_URL}/youtube`,
+  XIAOYUZHOU: `${BASE_URL}/xiaoyuzhou`, // 添加小宇宙API
   WS_BILI: `${WS_BASE_URL}/bili/ws`,
   WS_YOUTUBE: `${WS_BASE_URL}/youtube/ws`,
+  WS_XIAOYUZHOU: `${WS_BASE_URL}/xiaoyuzhou/ws`, // 添加小宇宙WebSocket
   VIDEO: `${BASE_URL}/video`,
-  HISTORY:`${BASE_URL}/history`,
+  HISTORY: `${BASE_URL}/history`,
 }
 
-export default API_CONFIG 
+export default API_CONFIG

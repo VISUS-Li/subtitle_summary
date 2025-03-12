@@ -46,13 +46,13 @@ class SubtitleManager:
         """获取视频信息"""
         with get_db() as db:
             video = db.query(Video).filter(
-                Video.platform == platform,
+                Video.platform == platform.value,
                 Video.platform_vid == platform_vid
             ).first()
             if video:
                 return {
                     'id': video.id,
-                    'platform': video.platform.value,
+                    'platform': video.platform,
                     'title': video.title,
                     'author': video.author,
                     'duration': video.duration,
@@ -79,7 +79,7 @@ class SubtitleManager:
                 platform_vid = video_info.get('id')
                 
                 video = db.query(Video).filter(
-                    Video.platform == platform,
+                    Video.platform == platform.value,
                     Video.platform_vid == platform_vid
                 ).first()
                 
@@ -88,7 +88,7 @@ class SubtitleManager:
                     video_id = str(uuid.uuid4())
                     video = Video(
                         id=video_id,
-                        platform=platform,
+                        platform=platform.value,
                         platform_vid=platform_vid,
                         title=video_info.get('title'),
                         author=video_info.get('author'),
@@ -130,7 +130,7 @@ class SubtitleManager:
             video = db.query(Video).get(internal_id)
             if video:
                 result = {
-                    'platform': video.platform.value,
+                    'platform': video.platform,
                     'platform_vid': video.platform_vid,
                 }
                 if video.platform == Platform.BILIBILI:
@@ -176,7 +176,7 @@ class SubtitleManager:
             with self._db_transaction() as db:
                 # 检查视频是否存在
                 video = db.query(Video).filter(
-                    Video.platform == platform,
+                    Video.platform == platform.value,
                     Video.platform_vid == platform_vid
                 ).first()
                 
@@ -315,7 +315,7 @@ class SubtitleManager:
                 subtitle = Subtitle(
                     video_id=video.id,
                     platform_vid=video.platform_vid,
-                    platform=platform,
+                    platform=platform.value,
                     source=source,
                     content=pure_text,
                     timed_content=timed_content,
@@ -402,7 +402,7 @@ class SubtitleManager:
                 {
                     'id': v.id,
                     'title': v.title,
-                    'platform': v.platform.value,
+                    'platform': v.platform,
                     'subtitle': self.get_subtitle(v.id)
                 }
                 for v in videos
@@ -438,14 +438,14 @@ class SubtitleManager:
         """
         with get_db() as db:
             video = db.query(Video).filter(
-                Video.platform == platform,
+                Video.platform == platform.value,
                 Video.platform_vid == platform_vid
             ).first()
             
             if video:
                 result = {
                     'id': video.id,
-                    'platform': video.platform.value,
+                    'platform': video.platform,
                     'platform_vid': video.platform_vid,
                     'title': video.title,
                     'author': video.author,
@@ -556,7 +556,7 @@ class SubtitleManager:
                     .join(Subtitle, Video.id == Subtitle.video_id)
                     .outerjoin(SubtitleSummary, Subtitle.id == SubtitleSummary.subtitle_id)
                     .filter(
-                        Video.platform == platform,
+                        Video.platform == platform.value,
                         Video.search_keyword == search_keyword
                     )
                     .order_by(Video.search_rank)
@@ -566,7 +566,7 @@ class SubtitleManager:
                 for video, subtitle, summary in query.all():
                     video_data = {
                         'id': video.id,
-                        'platform': video.platform.value,
+                        'platform': video.platform,
                         'platform_vid': video.platform_vid,
                         'title': video.title,
                         'author': video.author,
@@ -643,7 +643,7 @@ class SubtitleManager:
             with self._db_transaction() as db:
                 script = GeneratedScript(
                     topic=topic,
-                    platform=platform,
+                    platform=platform.value,
                     content=content,
                     video_count=video_count,
                     video_ids=video_ids,
@@ -696,7 +696,7 @@ class SubtitleManager:
                 return {
                     'id': script.id,
                     'topic': script.topic,
-                    'platform': script.platform.value,
+                    'platform': script.platform,
                     'content': script.content,
                     'video_count': script.video_count,
                     'create_time': script.create_time.isoformat(),
@@ -750,7 +750,7 @@ class SubtitleManager:
                 )
                 
                 if platform:
-                    query = query.filter(GeneratedScript.platform == platform)
+                    query = query.filter(GeneratedScript.platform == platform.value)
                     
                 scripts = query.order_by(GeneratedScript.create_time.desc()).all()
                 
@@ -758,7 +758,7 @@ class SubtitleManager:
                     {
                         'id': s.id,
                         'topic': s.topic,
-                        'platform': s.platform.value,
+                        'platform': s.platform,
                         'content': s.content,
                         'video_count': s.video_count,
                         'create_time': s.create_time.isoformat(),
@@ -878,7 +878,7 @@ class SubtitleManager:
         try:
             # 获取相关视频的字幕和总结
             videos_data = self.get_videos_with_subtitles_and_summaries(
-                platform=platform,
+                platform=platform.value,
                 search_keyword=keyword
             )
             

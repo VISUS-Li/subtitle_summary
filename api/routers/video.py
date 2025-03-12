@@ -18,6 +18,7 @@ video_processor = None
 class PlatformChoice(str, Enum):
     BILIBILI = "bilibili"
     YOUTUBE = "youtube"
+    XIAOYUZHOU = "xiaoyuzhou"
     ALL = "all"
 
 # 添加一个新的请求模型
@@ -67,6 +68,13 @@ def parse_video_url(url: str) -> tuple[str, Platform]:
         ValueError: URL格式无效
     """
     parsed = urlparse(str(url))
+    
+# 处理小宇宙链接
+    if 'xiaoyuzhoufm.com' in parsed.netloc:
+        path_parts = parsed.path.split('/')
+        if len(path_parts) >= 3 and path_parts[1] == 'episode':
+            return path_parts[2], Platform.XIAOYUZHOU
+        raise ValueError("无效的小宇宙播客链接")
     
     # 处理B站链接
     if 'bilibili.com' in parsed.netloc:

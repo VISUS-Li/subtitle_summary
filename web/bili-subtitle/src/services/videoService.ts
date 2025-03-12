@@ -26,6 +26,15 @@ const extractVideoId = {
     }
     
     throw new Error('无效的 YouTube 视频 URL 或 ID')
+  },
+
+  xiaoyuzhou(input: string): string {
+    const urlPattern = /xiaoyuzhoufm\.com\/episode\/([a-zA-Z0-9]+)/
+    const match = input.match(urlPattern)
+    if (match) {
+      return match[1]
+    }
+    throw new Error('无效的小宇宙播客链接')
   }
 }
 
@@ -135,5 +144,52 @@ export const videoService = {
       console.error('批量处理失败:', error)
       throw error
     }
+  },
+
+  // 处理播客视频
+  async processPodcast(
+    url: string,
+    onProgress?: (progress: Progress) => void
+  ): Promise<{ task_id: string }> {
+    try {
+      const response = await axios.post(
+        `${API_CONFIG.XIAOYUZHOU}/process`,
+        { url },
+        {
+          timeout: 300000,
+          headers: { 'Content-Type': 'application/json' }
+        }
+      )
+
+      if (!response.data?.task_id) {
+        throw new Error('未获取到任务ID')
+      }
+
+      if (onProgress) {
+        const ws = new WebSocket(`${API_CONFIG.WS_XIAOYUZHOU}/${response.data.task_id}`)
+        ws.onmessage = (event) => {
+          const progress = JSON.parse(event.data)
+          onProgress(progress)
+        }
+      }
+
+      return { task_id: response.data.task_id }
+    } catch (error) {
+      console.error('播客处理请求失败:', error)
+      throw error
+    }
+  },
+
+  // 搜索播客
+  async searchPodcasts(keyword: string, page = 1, pageSize = 20): Promise<PodcastResult[]> {
+    try {
+      const response = await axios.get(`${API_CONFIG.XIAOYUZHOU}/search`, {
+        params: { keyword, page, page_size: pageSize }
+      })
+      return response.data
+    } catch (error) {
+      console.error('搜索播客失败:', error)
+      throw error
+    }
   }
-} 
+}
